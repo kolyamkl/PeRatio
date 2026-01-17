@@ -49,18 +49,24 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
   const { connect, isConnecting, isConnected, walletType } = useWallet()
 
   const handleConnect = async (wallet: WalletOption) => {
+    console.log('[WalletModal] 🔗 Connect clicked:', wallet.name)
     hapticFeedback('impact', 'medium')
     
     // Only MetaMask is supported - redirect others to MetaMask
     if (wallet.id !== 'metamask') {
+      console.log('[WalletModal] ⚠️ Unsupported wallet, using MetaMask instead')
       hapticFeedback('notification', 'warning')
       alert(`${wallet.name} coming soon!\n\nConnecting with MetaMask instead...`)
     }
     
+    console.log('[WalletModal] 📡 Initiating MetaMask connection...')
     // Always connect with MetaMask
     const success = await connect('metamask')
     
+    console.log('[WalletModal] Connection result:', success ? '✅ Success' : '❌ Failed')
+    
     if (success) {
+      console.log('[WalletModal] 🎉 Closing modal after successful connection')
       setTimeout(() => {
         onClose()
       }, 500)

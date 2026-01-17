@@ -1,8 +1,15 @@
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, validator
+
+
+class BasketAssetSchema(BaseModel):
+    """Single asset in a basket"""
+    coin: str
+    weight: float
+    notional: float = 0.0
 
 
 class PairLegSchema(BaseModel):
@@ -19,9 +26,15 @@ class TradeSchema(BaseModel):
     reasoning: str
     status: str
     expiresAt: Optional[datetime] = None
+    # Multi-basket fields
+    longBasket: Optional[List[BasketAssetSchema]] = None
+    shortBasket: Optional[List[BasketAssetSchema]] = None
+    basketCategory: Optional[str] = None
+    confidence: Optional[float] = None
+    factorAnalysis: Optional[Dict[str, Any]] = None
 
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 
 class GenerateTradeRequest(BaseModel):
@@ -69,7 +82,7 @@ class NotificationSettingSchema(BaseModel):
     lastSentAt: Optional[datetime] = None
 
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 
 class SaveNotificationSettingRequest(BaseModel):

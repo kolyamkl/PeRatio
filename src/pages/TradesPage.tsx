@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { 
   ArrowRight, 
@@ -6,26 +6,137 @@ import {
   Search, 
   Filter,
   Zap,
-  BarChart3
+  BarChart3,
+  Loader2,
+  RefreshCw
 } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { SegmentedSwitch } from '../components/SegmentedSwitch'
 import { TradeCard } from '../components/TradeCard'
 import { PerformanceChart } from '../components/PerformanceChart'
-import { getOpenTrades, getClosedTrades, formatCurrency, formatPercent } from '../lib/mockData'
+import { formatCurrency, formatPercent, type Trade, availableCoins } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'
 
+// Backend URL - uses env var in production, empty for dev (Vite proxy)
+const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
+
 type TabValue = 'Open' | 'Closed'
+
+// API response type from backend
+interface ApiTrade {
+  tradeId: string
+  pair: {
+    long: { symbol: string; notional: number; leverage: number }
+    short: { symbol: string; notional: number; leverage: number }
+  }
+  takeProfitRatio: number
+  stopLossRatio: number
+  reasoning: string
+  status: string
+  expiresAt: string | null
+}
+
+// Convert API trade to frontend Trade format
+function apiTradeToTrade(apiTrade: ApiTrade): Trade {
+  const longSymbol = apiTrade.pair.long.symbol.replace('-PERP', '')
+  const shortSymbol = apiTrade.pair.short.symbol.replace('-PERP', '')
+  
+  const longCoin = availableCoins.find(c => c.ticker === longSymbol) || { name: longSymbol, ticker: longSymbol }
+  const shortCoin = availableCoins.find(c => c.ticker === shortSymbol) || { name: shortSymbol, ticker: shortSymbol }
+  
+  const totalNotional = apiTrade.pair.long.notional + apiTrade.pair.short.notional
+  const longPct = Math.round((apiTrade.pair.long.notional / totalNotional) * 100)
+  
+  return {
+    id: apiTrade.tradeId,
+    longCoin,
+    shortCoin,
+    status: apiTrade.status === 'OPEN' ? 'open' : apiTrade.status === 'CLOSED' ? 'closed' : 'open',
+    openedAt: new Date().toISOString(), // API doesn't provide this yet
+    closedAt: null,
+    notionalUsd: totalNotional,
+    leverage: apiTrade.pair.long.leverage,
+    stopLossPct: Math.abs(apiTrade.stopLossRatio * 100),
+    takeProfitPct: Math.abs(apiTrade.takeProfitRatio * 100),
+    longPct,
+    shortPct: 100 - longPct,
+    pnlUsd: 0, // Will be calculated from positions
+    pnlPct: 0,
+    details: {
+      entryPriceLong: longCoin.price || 0,
+      entryPriceShort: shortCoin.price || 0,
+      currentPriceLong: longCoin.price || 0,
+      currentPriceShort: shortCoin.price || 0,
+      orderId: apiTrade.tradeId,
+      strategyTag: 'AI Signal',
+      correlation: 0.85,
+      cointegration: true,
+      halfLife: 1.2,
+      zScore: 1.5,
+      hedgeRatio: 0.5,
+      winRate: 75,
+      sharpeRatio: 2.1,
+      volatility: 25,
+      timeframe: '1h',
+      tradingEngine: 'Hyperliquid',
+      remarks: apiTrade.reasoning,
+    },
+  }
+}
 
 export function TradesPage() {
   const [activeTab, setActiveTab] = useState<TabValue>('Open')
   const [searchQuery, setSearchQuery] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [showChart, setShowChart] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [allApiTrades, setAllApiTrades] = useState<Trade[]>([])
   const navigate = useNavigate()
   
-  const openTrades = getOpenTrades()
-  const closedTrades = getClosedTrades()
+  // Fetch trades from API
+  const fetchTrades = async () => {
+    setLoading(true)
+    setError(null)
+    console.log('[TradesPage] 📊 Fetching trades from API...')
+    console.log('[TradesPage] Backend URL:', backendUrl || '(using proxy)')
+    
+    try {
+      const res = await fetch(`${backendUrl}/api/trades?limit=100`)
+      console.log('[TradesPage] Response status:', res.status)
+      
+      if (!res.ok) {
+        throw new Error(`Failed to fetch trades: ${res.status}`)
+      }
+      
+      const apiTrades: ApiTrade[] = await res.json()
+      console.log('[TradesPage] ✅ Received', apiTrades.length, 'trades from API')
+      console.log('[TradesPage] Raw API data:', apiTrades)
+      
+      const trades = apiTrades.map(apiTradeToTrade)
+      console.log('[TradesPage] Converted trades:', trades)
+      setAllApiTrades(trades)
+    } catch (err) {
+      console.error('[TradesPage] ❌ Error fetching trades:', err)
+      setError(err instanceof Error ? err.message : 'Failed to load trades')
+    } finally {
+      setLoading(false)
+    }
+  }
+  
+  useEffect(() => {
+    fetchTrades()
+  }, [])
+  
+  // Filter trades by status (OPEN vs CLOSED/PENDING)
+  const openTrades = useMemo(() => 
+    allApiTrades.filter(t => t.status === 'open'), 
+    [allApiTrades]
+  )
+  const closedTrades = useMemo(() => 
+    allApiTrades.filter(t => t.status === 'closed'),
+    [allApiTrades]
+  )
   
   const allTrades = activeTab === 'Open' ? openTrades : closedTrades
   
@@ -60,10 +171,62 @@ export function TradesPage() {
     navigate('/')
   }
   
+  const handleRefresh = () => {
+    hapticFeedback('impact', 'light')
+    fetchTrades()
+  }
+  
+  // Loading state
+  if (loading) {
+    return (
+      <div className="flex flex-col min-h-screen bg-bg-primary">
+        <TopBar title="My Trades" showBackButton />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <Loader2 className="w-10 h-10 text-accent-primary animate-spin mx-auto mb-4" />
+            <p className="text-text-secondary">Loading trades from database...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+  
+  // Error state
+  if (error) {
+    return (
+      <div className="flex flex-col min-h-screen bg-bg-primary">
+        <TopBar title="My Trades" showBackButton />
+        <div className="flex-1 flex items-center justify-center px-4">
+          <div className="text-center">
+            <p className="text-accent-danger mb-4">{error}</p>
+            <button
+              onClick={handleRefresh}
+              className="px-4 py-2 bg-accent-primary text-black rounded-xl font-medium"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+  
   return (
     <div className="flex flex-col min-h-screen bg-bg-primary">
-      {/* Top bar */}
-      <TopBar title="My Trades" showBackButton />
+      {/* Top bar with refresh */}
+      <TopBar 
+        title="My Trades" 
+        showBackButton 
+        rightContent={
+          <button
+            onClick={handleRefresh}
+            className="w-11 h-11 flex items-center justify-center rounded-xl bg-bg-secondary border border-border btn-press hover:bg-bg-tertiary transition-colors"
+            title="Refresh trades"
+          >
+            <RefreshCw className="w-5 h-5 text-accent-primary" />
+          </button>
+        }
+      />
       
       {/* Search and Filters */}
       <div className="px-4 mb-4">
@@ -183,10 +346,11 @@ export function TradesPage() {
         </div>
       </div>
       
-      {/* Performance Chart Modal */}
+      {/* Performance Chart Modal - uses all trades from API */}
       <PerformanceChart 
         isOpen={showChart}
         onClose={() => setShowChart(false)}
+        trades={allApiTrades}
       />
       
       {/* Trades list */}

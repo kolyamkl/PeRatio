@@ -5,11 +5,25 @@ import { useToast } from './Toast'
 
 type ConfirmState = 'idle' | 'submitting' | 'confirmed'
 
-interface StickyConfirmProps {
-  disabled?: boolean
+interface TradeData {
+  pair: {
+    long: { symbol: string; notional: number; leverage: number }
+    short: { symbol: string; notional: number; leverage: number }
+  }
+  takeProfitRatio: number
+  stopLossRatio: number
 }
 
-export function StickyConfirm({ disabled = false }: StickyConfirmProps) {
+interface StickyConfirmProps {
+  disabled?: boolean
+  tradeId?: string
+  tradeData?: TradeData
+}
+
+// Backend URL - uses env var in production, empty for dev (Vite proxy)
+const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
+
+export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyConfirmProps) {
   const [state, setState] = useState<ConfirmState>('idle')
   const [ripple, setRipple] = useState<{ x: number; y: number } | null>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
@@ -34,12 +48,53 @@ export function StickyConfirm({ disabled = false }: StickyConfirmProps) {
     
     setState('submitting')
     
-    // Simulate API call with progress
-    await new Promise(resolve => setTimeout(resolve, 1500))
-    
-    setState('confirmed')
-    hapticFeedback('notification', 'success')
-    showToast('Trade submitted (demo)', 'success')
+    try {
+      if (tradeId && tradeData) {
+        // Call real execute API
+        const apiUrl = `${backendUrl}/api/trades/${tradeId}/execute`
+        console.log('[StickyConfirm] 🚀 Executing trade:', tradeId)
+        console.log('[StickyConfirm] API URL:', apiUrl)
+        console.log('[StickyConfirm] Trade data:', JSON.stringify(tradeData, null, 2))
+        
+        const res = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pair: tradeData.pair,
+            takeProfitRatio: tradeData.takeProfitRatio,
+            stopLossRatio: tradeData.stopLossRatio,
+          }),
+        })
+        
+        console.log('[StickyConfirm] Response status:', res.status)
+        
+        if (!res.ok) {
+          const error = await res.json()
+          console.error('[StickyConfirm] ❌ Error response:', error)
+          throw new Error(error.detail || 'Trade execution failed')
+        }
+        
+        const result = await res.json()
+        console.log('[StickyConfirm] ✅ Trade executed:', result)
+        
+        setState('confirmed')
+        hapticFeedback('notification', 'success')
+        showToast('Trade executed via Pear Protocol!', 'success')
+      } else {
+        // Demo mode - no tradeId
+        console.log('[StickyConfirm] ⚠️ Demo mode - simulating trade (no tradeId)')
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        setState('confirmed')
+        hapticFeedback('notification', 'success')
+        showToast('Trade submitted (demo)', 'success')
+      }
+    } catch (err: unknown) {
+      const error = err as Error
+      console.error('[StickyConfirm] Error:', error)
+      setState('idle')
+      hapticFeedback('notification', 'error')
+      showToast(error.message || 'Trade failed', 'error')
+    }
   }
   
   const buttonContent = () => {
@@ -53,7 +108,7 @@ export function StickyConfirm({ disabled = false }: StickyConfirmProps) {
                 <Loader2 className="w-5 h-5 opacity-30" />
               </div>
             </div>
-            <span className="animate-pulse">Processing...</span>
+            <span className="animate-pulse">Executing...</span>
           </div>
         )
       case 'confirmed':
@@ -87,7 +142,7 @@ export function StickyConfirm({ disabled = false }: StickyConfirmProps) {
           return (
             <span className="flex items-center gap-2">
               <Wallet className="w-5 h-5" />
-              <span>Connect Wallet First</span>
+              <span>Wallet Not Ready</span>
             </span>
           )
         }

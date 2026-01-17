@@ -15,10 +15,11 @@
     "example:bot": "tsx src/examples/custom-trading-script.ts"
   },
   "dependencies": {
-    "ethers": "^6.13.4",
+    "@nktkas/hyperliquid": "^0.30.2",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
-    "@nktkas/hyperliquid": "^0.30.2",
+    "ethers": "^6.13.4",
+    "openai": "^6.16.0",
     "viem": "^2.21.45"
   },
   "devDependencies": {
@@ -27,4 +28,3 @@
     "typescript": "^5.7.3"
   }
 }
-

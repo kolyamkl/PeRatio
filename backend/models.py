@@ -1,7 +1,15 @@
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict, Any
+import json
 
 from sqlmodel import Field, SQLModel
+
+
+class BasketAsset(SQLModel):
+    """Single asset in a basket"""
+    coin: str
+    weight: float
+    notional: float = 0.0
 
 
 class PairLeg(SQLModel):
@@ -31,9 +39,34 @@ class Trade(SQLModel, table=True):
     stop_loss_ratio: float
     reasoning: str
     status: str = Field(default="PENDING", index=True)
+    pear_order_id: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     expires_at: Optional[datetime] = Field(default=None, index=True)
+    # Multi-basket fields (JSON strings)
+    long_basket_json: Optional[str] = Field(default=None)  # JSON: [{"coin": "BTC", "weight": 0.5, "notional": 100}]
+    short_basket_json: Optional[str] = Field(default=None)  # JSON: [{"coin": "ETH", "weight": 0.5, "notional": 100}]
+    basket_category: Optional[str] = Field(default=None)  # LAYER1_VS_LAYER2, BLUECHIP_VS_ALTS, etc.
+    confidence: Optional[float] = Field(default=None)  # 0-10 scale
+    factor_analysis_json: Optional[str] = Field(default=None)  # JSON with all factor scores
+    
+    def get_long_basket(self) -> List[Dict[str, Any]]:
+        """Parse long basket from JSON"""
+        if self.long_basket_json:
+            return json.loads(self.long_basket_json)
+        return [{"coin": self.pair_long_symbol.replace("-PERP", ""), "weight": 1.0, "notional": self.pair_long_notional}]
+    
+    def get_short_basket(self) -> List[Dict[str, Any]]:
+        """Parse short basket from JSON"""
+        if self.short_basket_json:
+            return json.loads(self.short_basket_json)
+        return [{"coin": self.pair_short_symbol.replace("-PERP", ""), "weight": 1.0, "notional": self.pair_short_notional}]
+    
+    def get_factor_analysis(self) -> Optional[Dict[str, Any]]:
+        """Parse factor analysis from JSON"""
+        if self.factor_analysis_json:
+            return json.loads(self.factor_analysis_json)
+        return None
 
     def to_payload(self) -> TradePayload:
         return TradePayload(

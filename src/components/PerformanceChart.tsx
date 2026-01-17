@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { X, TrendingUp, TrendingDown, Sparkles } from 'lucide-react'
-import { mockTrades, formatCurrency } from '../lib/mockData'
+import { formatCurrency, type Trade } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'
 
 type TimeRange = '1D' | '1W' | '1M' | '3M' | 'ALL'
@@ -8,6 +8,7 @@ type TimeRange = '1D' | '1W' | '1M' | '3M' | 'ALL'
 interface PerformanceChartProps {
   isOpen: boolean
   onClose: () => void
+  trades?: Trade[]  // Now accepts trades from API
 }
 
 interface DataPoint {
@@ -17,7 +18,7 @@ interface DataPoint {
   label: string
 }
 
-export function PerformanceChart({ isOpen, onClose }: PerformanceChartProps) {
+export function PerformanceChart({ isOpen, onClose, trades = [] }: PerformanceChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>('1M')
   const [isAnimating, setIsAnimating] = useState(false)
   const [showLine, setShowLine] = useState(false)
@@ -72,7 +73,7 @@ export function PerformanceChart({ isOpen, onClose }: PerformanceChartProps) {
         startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
     }
 
-    const filteredTrades = mockTrades.filter(trade => {
+    const filteredTrades = trades.filter(trade => {
       const tradeDate = new Date(trade.openedAt)
       return tradeDate >= startDate && tradeDate <= now
     })
@@ -114,11 +115,11 @@ export function PerformanceChart({ isOpen, onClose }: PerformanceChartProps) {
     }
 
     return dataPoints
-  }, [timeRange])
+  }, [timeRange, trades])
 
   const stats = useMemo(() => {
     const totalPnl = chartData.length > 0 ? chartData[chartData.length - 1].cumulative : 0
-    const trades = mockTrades.filter(t => {
+    const filteredTrades = trades.filter(t => {
       const now = new Date()
       let startDate: Date
       switch (timeRange) {
@@ -140,20 +141,20 @@ export function PerformanceChart({ isOpen, onClose }: PerformanceChartProps) {
       return new Date(t.openedAt) >= startDate
     })
     
-    const winningTrades = trades.filter(t => t.pnlUsd > 0).length
-    const losingTrades = trades.filter(t => t.pnlUsd < 0).length
-    const winRate = trades.length > 0 ? (winningTrades / trades.length) * 100 : 0
-    const avgPnl = trades.length > 0 ? totalPnl / trades.length : 0
+    const winningTrades = filteredTrades.filter(t => t.pnlUsd > 0).length
+    const losingTrades = filteredTrades.filter(t => t.pnlUsd < 0).length
+    const winRate = filteredTrades.length > 0 ? (winningTrades / filteredTrades.length) * 100 : 0
+    const avgPnl = filteredTrades.length > 0 ? totalPnl / filteredTrades.length : 0
 
     return {
       totalPnl,
-      totalTrades: trades.length,
+      totalTrades: filteredTrades.length,
       winningTrades,
       losingTrades,
       winRate,
       avgPnl,
     }
-  }, [chartData, timeRange])
+  }, [chartData, timeRange, trades])
 
   // Animate the P&L number
   useEffect(() => {

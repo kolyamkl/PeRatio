@@ -7,6 +7,8 @@ export default defineConfig({
     port: 5173,
     host: true,
     hmr: {
+      protocol: 'wss',
+      host: 'clinton-runtier-muriel.ngrok-free.dev',
       clientPort: 443
     },
     allowedHosts: ['.loca.lt', '.ngrok-free.dev', '.ngrok.io', '.trycloudflare.com'],

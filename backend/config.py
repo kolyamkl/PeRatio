@@ -2,7 +2,7 @@ import os
 from functools import lru_cache
 from typing import List, Optional
 
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import computed_field, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,16 +16,25 @@ class Settings(BaseSettings):
     bot_token: str = ""
     backend_url: str = ""
     database_url: str = "sqlite:///./trades.db"
-    cors_origins: List[str] = ["*"]
+    cors_origins: str = "*"
     mini_app_url: str = ""
-    pear_api_url: str = ""
+    
+    # OpenAI settings
+    openai_api_key: str = ""
+    
+    # Pear Protocol settings
+    pear_api_url: str = "https://hl-v2.pearprotocol.io"
+    pear_client_id: str = "HLHackathon9"
+    pear_private_key: str = ""
+    pear_user_wallet: str = ""
+    pear_agent_wallet: str = ""
+    pear_access_token: str = ""
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def split_origins(cls, v):
-        if isinstance(v, str):
-            return [o.strip() for o in v.split(",") if o.strip()] or ["*"]
-        return v or ["*"]
+    def get_cors_list(self) -> List[str]:
+        """Parse CORS origins from string"""
+        if not self.cors_origins or self.cors_origins == "*":
+            return ["*"]
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache
