@@ -33,8 +33,12 @@ from .schemas import (
 settings = get_settings()
 app = FastAPI(title="PeRatio Mini App Backend", version="0.1.0")
 telegram_app: Optional[Application] = None
-BACKEND_BASE = settings.backend_url or os.environ.get("BACKEND_URL") or ""
-MINI_APP_URL = settings.mini_app_url or os.environ.get("MINI_APP_URL") or "https://example.com"
+BACKEND_BASE = settings.backend_url or os.environ.get("BACKEND_URL", "")
+MINI_APP_URL = settings.mini_app_url or os.environ.get("MINI_APP_URL", "https://example.com")
+
+print(f"[CONFIG] BOT_TOKEN: {'SET' if settings.bot_token else 'MISSING'}")
+print(f"[CONFIG] BACKEND_URL: {BACKEND_BASE}")
+print(f"[CONFIG] MINI_APP_URL: {MINI_APP_URL}")
 
 
 def format_trade_message(trade: Dict[str, Any]) -> tuple[str, InlineKeyboardMarkup]:
@@ -47,11 +51,11 @@ def format_trade_message(trade: Dict[str, Any]) -> tuple[str, InlineKeyboardMark
     message = (
         "🤖 *AI Pair Trade Recommendation*\n\n"
         "📊 *Pair:*\n"
-        f"LONG: {long_leg.get('symbol')} | ${long_leg.get('notional')} | {long_leg.get('leverage')}x\n"
-        f"SHORT: {short_leg.get('symbol')} | ${short_leg.get('notional')} | {short_leg.get('leverage')}x\n\n"
+        f"  LONG: {long_leg.get('symbol')} | ${long_leg.get('notional')} | {long_leg.get('leverage')}x\n"
+        f"  SHORT: {short_leg.get('symbol')} | ${short_leg.get('notional')} | {short_leg.get('leverage')}x\n\n"
         f"🎯 Take Profit: *+{tp:.1f}%*\n"
-        f"🛑 Stop Loss: *{sl:.1f}%*\n\n"
-        f"💡 Reasoning:\n{trade.get('reasoning')}\n\n"
+        f"🛡 Stop Loss: *{sl:.1f}%*\n\n"
+        f"💡 *Reasoning:*\n{trade.get('reasoning')}\n\n"
         "Tap below to review and confirm ⬇️"
     )
 
@@ -79,13 +83,15 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     try:
         async with httpx.AsyncClient(timeout=10) as client:
+            # Use localhost for internal API calls to avoid tunnel issues
             resp = await client.post(
-                f"{BACKEND_BASE}/api/llm/generate-trade" if BACKEND_BASE else "/api/llm/generate-trade",
+                "http://localhost:8000/api/llm/generate-trade",
                 json={"userId": str(user.id)},
             )
             resp.raise_for_status()
             trade = resp.json()
-    except Exception:
+    except Exception as e:
+        print(f"Error in handle_start: {e}")
         await context.bot.send_message(chat_id, "❌ Error generating trade. Please try again.")
         return
 
@@ -102,25 +108,37 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def on_startup() -> None:
     init_db()
     global telegram_app
-    if settings.bot_token:
-        telegram_app = Application.builder().token(settings.bot_token).build()
-        telegram_app.add_handler(CommandHandler("start", handle_start))
-        await telegram_app.initialize()
-        await telegram_app.start()
+    
+    bot_token = settings.bot_token
+    print(f"[STARTUP] Bot token: {'SET (' + bot_token[:10] + '...)' if bot_token else 'MISSING'}")
+    
+    if bot_token:
+        try:
+            print("[STARTUP] Initializing Telegram bot...")
+            telegram_app = Application.builder().token(bot_token).build()
+            telegram_app.add_handler(CommandHandler("start", handle_start))
+            await telegram_app.initialize()
+            await telegram_app.start()
+            print("[STARTUP] Telegram bot initialized successfully")
 
-        public_base = settings.backend_url or os.environ.get("BACKEND_URL")
-        if public_base:
-            webhook_url = f"{public_base.rstrip('/')}/bot/webhook"
-            try:
-                await telegram_app.bot.delete_webhook()
-                await telegram_app.bot.set_webhook(webhook_url)
-            except Exception as exc:  # pragma: no cover
-                print(f"Failed to set webhook: {exc}")
+            if BACKEND_BASE:
+                webhook_url = f"{BACKEND_BASE.rstrip('/')}/bot/webhook"
+                try:
+                    await telegram_app.bot.delete_webhook()
+                    await telegram_app.bot.set_webhook(webhook_url)
+                    print(f"[STARTUP] Webhook set to: {webhook_url}")
+                except Exception as exc:
+                    print(f"[STARTUP] Failed to set webhook: {exc}")
+        except Exception as exc:
+            print(f"[STARTUP] Failed to initialize bot: {exc}")
+            telegram_app = None
+    else:
+        print("[STARTUP] WARNING: No bot token, bot not initialized")
 
     try:
         app.state.notification_task = asyncio.create_task(notification_worker())
-    except Exception as exc:  # pragma: no cover
-        print(f"Failed to start scheduler: {exc}")
+    except Exception as exc:
+        print(f"[STARTUP] Failed to start scheduler: {exc}")
 
 
 if settings.cors_origins:
@@ -400,11 +418,19 @@ def health() -> dict:
 async def bot_webhook(request: Request) -> dict:
     global telegram_app
     if not telegram_app:
+        print("ERROR: Bot not initialized")
         raise HTTPException(status_code=500, detail="Bot not initialized")
-    data = await request.json()
-    update = Update.de_json(data=data, bot=telegram_app.bot)
-    await telegram_app.update_queue.put(update)
-    return {"ok": True}
+    try:
+        data = await request.json()
+        print(f"Received webhook update: {data.get('update_id', 'unknown')}")
+        update = Update.de_json(data=data, bot=telegram_app.bot)
+        await telegram_app.process_update(update)
+        return {"ok": True}
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.on_event("shutdown")
@@ -480,16 +506,16 @@ def build_notification_message(
     if not lines:
         body = "No open positions. Account idle."
     else:
-        body = "\\n".join(lines)
+        body = "\n".join(lines)
 
-    header = f"\\ud83d\\udcc8 Portfolio Update — {timestamp.strftime('%Y-%m-%d %H:%M UTC')}"
+    header = f"📈 Portfolio Update — {timestamp.strftime('%Y-%m-%d %H:%M UTC')}"
     overview = (
-        f"Balance (est): ${total_notional:,.2f}\\n"
-        f"Open Positions: {total_positions}\\n"
+        f"Balance (est): ${total_notional:,.2f}\n"
+        f"Open Positions: {total_positions}\n"
         f"P/L: {total_pnl_pct:+.2f}% (${total_pnl:,.2f})"
     )
 
-    message = f"{header}\\n\\n{overview}\\n\\n{body}\\n\\nTap below for details."
+    message = f"{header}\n\n{overview}\n\n{body}\n\nTap below for details."
     keyboard = {
         "inline_keyboard": [
             [
@@ -512,7 +538,7 @@ async def send_notification(setting: NotificationSetting) -> None:
     with Session(engine) as session:
         trades = session.exec(select(Trade).where(Trade.user_id == setting.user_id)).all()
 
-    mini_app_url = settings.mini_app_url or "https://example.com"
+    mini_app_url = MINI_APP_URL or "https://example.com"
     payload = build_notification_message(trades, now_utc, mini_app_url)
 
     await telegram_app.bot.send_message(

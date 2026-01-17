@@ -241,3 +241,66 @@ export function getViewport(): {
     isExpanded: tg?.isExpanded || false,
   }
 }
+
+/**
+ * Get Telegram user info from init data
+ */
+export function getTelegramUserInfo(): {
+  userId: string | null
+  chatId: string | null
+  username: string | null
+  firstName: string | null
+  lastName: string | null
+} {
+  const tg = getTelegram() as unknown as { 
+    initDataUnsafe?: { 
+      user?: { 
+        id?: number
+        username?: string
+        first_name?: string
+        last_name?: string
+      }
+      chat?: {
+        id?: number
+      }
+      start_param?: string
+    }
+  }
+  
+  const user = tg?.initDataUnsafe?.user
+  const chat = tg?.initDataUnsafe?.chat
+  
+  // For development/testing outside Telegram, check URL params
+  if (!user?.id) {
+    const urlParams = new URLSearchParams(window.location.search)
+    const testUserId = urlParams.get('user_id') || urlParams.get('userId')
+    const testChatId = urlParams.get('chat_id') || urlParams.get('chatId')
+    
+    if (testUserId) {
+      return {
+        userId: testUserId,
+        chatId: testChatId || testUserId,
+        username: urlParams.get('username') || 'test_user',
+        firstName: urlParams.get('first_name') || 'Test',
+        lastName: urlParams.get('last_name') || 'User',
+      }
+    }
+    
+    // Return null values when not in Telegram and no test params
+    return {
+      userId: null,
+      chatId: null,
+      username: null,
+      firstName: null,
+      lastName: null,
+    }
+  }
+  
+  return {
+    userId: user.id?.toString() || null,
+    chatId: chat?.id?.toString() || user.id?.toString() || null,
+    username: user.username || null,
+    firstName: user.first_name || null,
+    lastName: user.last_name || null,
+  }
+}

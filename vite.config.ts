@@ -5,6 +5,16 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    host: true
+    host: true,
+    hmr: {
+      clientPort: 443
+    },
+    allowedHosts: ['.loca.lt', '.ngrok-free.dev', '.ngrok.io', '.trycloudflare.com'],
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      }
+    }
   }
 })
