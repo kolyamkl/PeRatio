@@ -5,8 +5,8 @@ import { appConfig } from "./config/app.config.js";
 // Configuration
 const MAIN_WALLET_PRIVATE_KEY = appConfig.PRIVATE_KEY;
 
-// Your agent wallet address from Pear Protocol
-const AGENT_WALLET_ADDRESS = "0x97964055012046D6C85416248D78B20D95d55ce6";
+// Your agent wallet address from Pear Protocol (loaded from .env via appConfig)
+const AGENT_WALLET_ADDRESS = appConfig.AGENT_WALLET_ADDRESS || "0x135E2DAA75464b4dA48141883610bBBcE46b07d8";
 const AGENT_NAME = "PearProtocol";
 
 /**

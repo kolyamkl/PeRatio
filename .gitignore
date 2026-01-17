@@ -1,1 +1,49 @@
+# Environment variables - NEVER commit these
+.env
+*.env
+**/.env
+.env.*
+*.env.*
+
+# Sensitive config files
+EXPORT_DATA.json
+**/EXPORT_DATA.json
+.pear_token
+**/.pear_token
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Node
 node_modules
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
