@@ -243,8 +243,10 @@ def generate_trade(
     short_symbol = random.choice([s for s in symbols if s != long_symbol])
     long_notional = round(random.uniform(100, 1000), 2)
     short_notional = round(random.uniform(100, 1000), 2)
-    leverage_long = random.choice([1, 2, 3, 5, 7, 10])
-    leverage_short = random.choice([1, 2, 3, 5, 7, 10])
+    # Use same leverage for both legs (unified leverage)
+    leverage = random.choice([1, 2, 3, 5, 7, 10])
+    leverage_long = leverage
+    leverage_short = leverage
     take_profit_ratio = round(random.uniform(0.02, 0.12), 3)
     stop_loss_ratio = -round(random.uniform(0.01, 0.06), 3)
     reasoning_pool = [

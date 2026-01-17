@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Zap, TrendingUp, TrendingDown, Activity, Sparkles, Target, Shield, AlertTriangle } from 'lucide-react'
+import { Zap, TrendingUp, TrendingDown, Activity, Sparkles, Target } from 'lucide-react'
 
 interface TradeSignalProps {
   correlation: number
@@ -92,9 +92,6 @@ export function TradeSignal({ correlation, zScore, confidence, signal }: TradeSi
 
   const config = getSignalConfig()
   const SignalIcon = config.icon
-
-  const circumference = 2 * Math.PI * 45
-  const strokeDashoffset = circumference - (animatedConfidence / 100) * circumference
 
   return (
     <div 

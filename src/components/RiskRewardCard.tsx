@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Shield, Target, AlertTriangle, TrendingUp, Flame, Snowflake, Zap } from 'lucide-react'
+import { Shield, Target, AlertTriangle, Flame, Snowflake, Zap } from 'lucide-react'
 
 interface RiskRewardCardProps {
   potentialProfit: number

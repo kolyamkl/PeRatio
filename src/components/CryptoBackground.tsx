@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 // Candlestick pattern data
 const generateCandlesticks = () => {

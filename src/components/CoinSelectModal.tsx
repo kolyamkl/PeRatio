@@ -160,7 +160,7 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
   if (!isOpen) return null
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-black/70 backdrop-blur-sm animate-fade-in"
@@ -168,9 +168,9 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
       />
       
       {/* Modal */}
-      <div className="relative w-full max-w-lg bg-bg-primary rounded-3xl animate-scale-in max-h-[85vh] flex flex-col overflow-hidden shadow-2xl shadow-accent-primary/10">
+      <div className="relative w-full max-w-lg bg-bg-primary rounded-3xl animate-scale-in max-h-[85vh] flex flex-col shadow-2xl shadow-accent-primary/10">
         {/* Header with city background */}
-        <div className="relative overflow-hidden">
+        <div className="relative overflow-hidden flex-shrink-0">
           {/* City silhouette background */}
           <div 
             className="absolute inset-0 opacity-30"
@@ -217,7 +217,7 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
         </div>
 
         {/* Search */}
-        <div className="px-4 py-3 border-b border-border">
+        <div className="px-4 py-3 border-b border-border flex-shrink-0">
           <div className="relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
             <input
@@ -231,7 +231,7 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
         </div>
 
         {/* Categories */}
-        <div className="px-4 py-3 border-b border-border overflow-x-auto">
+        <div className="px-4 py-3 border-b border-border overflow-x-auto flex-shrink-0">
           <div className="flex gap-2 min-w-max">
             {categories.map((cat) => (
               <button

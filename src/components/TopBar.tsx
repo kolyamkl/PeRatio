@@ -26,6 +26,7 @@ export function TopBar({ title, showBackButton, rightContent }: TopBarProps) {
   
   return (
     <div className="flex items-center justify-between px-4 py-3">
+      {/* Home/Back button - LEFT */}
       <button
         onClick={handleNavigation}
         className="w-11 h-11 flex items-center justify-center rounded-xl bg-bg-secondary border border-border btn-press hover:bg-bg-tertiary transition-colors"
@@ -38,15 +39,23 @@ export function TopBar({ title, showBackButton, rightContent }: TopBarProps) {
         )}
       </button>
       
-      {title && (
+      {/* Title - CENTER (only if provided) */}
+      {title ? (
         <h1 className="text-lg font-semibold text-text-primary">
           {title}
         </h1>
+      ) : (
+        <div className="flex-1" />
       )}
       
-      <div className="w-11 h-11 flex items-center justify-center">
-        {rightContent}
-      </div>
+      {/* Right content (settings button) - RIGHT */}
+      {rightContent ? (
+        <div className="w-11 h-11 flex items-center justify-center">
+          {rightContent}
+        </div>
+      ) : (
+        <div className="w-11 h-11" />
+      )}
     </div>
   )
 }

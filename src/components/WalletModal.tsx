@@ -13,47 +13,30 @@ interface WalletOption {
 
 const wallets: WalletOption[] = [
   {
-    id: 'tonconnect',
-    name: 'TON Wallet',
-    description: 'Telegram native wallet',
-    popular: true,
-  },
-  {
-    id: 'phantom',
-    name: 'Phantom',
-    description: 'Solana & Ethereum wallet',
-    popular: true,
-  },
-  {
     id: 'metamask',
     name: 'MetaMask',
-    description: 'Most popular Web3 wallet',
+    description: 'Connect via QR code or mobile app',
     popular: true,
   },
   {
-    id: 'walletconnect',
+    id: 'walletconnect' as WalletType,
     name: 'WalletConnect',
-    description: 'Connect any mobile wallet',
+    description: 'Scan with mobile wallet',
   },
   {
-    id: 'coinbase',
+    id: 'coinbase' as WalletType,
     name: 'Coinbase Wallet',
-    description: 'Self-custody crypto wallet',
+    description: 'Connect Coinbase wallet',
   },
   {
-    id: 'trust',
-    name: 'Trust Wallet',
-    description: 'Multi-chain crypto wallet',
+    id: 'phantom' as WalletType,
+    name: 'Phantom',
+    description: 'Solana & multi-chain wallet',
   },
   {
-    id: 'okx',
-    name: 'OKX Wallet',
-    description: 'Multi-chain DeFi wallet',
-  },
-  {
-    id: 'rabby',
-    name: 'Rabby',
-    description: 'Better security for DeFi',
+    id: 'tonconnect' as WalletType,
+    name: 'TON Connect',
+    description: 'Connect TON wallet',
   },
 ]
 
@@ -67,18 +50,22 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
 
   const handleConnect = async (wallet: WalletOption) => {
     hapticFeedback('impact', 'medium')
-    const success = await connect(wallet.id)
     
-    if (success && wallet.id !== 'tonconnect') {
-      // TON Connect has its own modal, so we don't close immediately
+    // Only MetaMask is supported - redirect others to MetaMask
+    if (wallet.id !== 'metamask') {
+      hapticFeedback('notification', 'warning')
+      alert(`${wallet.name} coming soon!\n\nConnecting with MetaMask instead...`)
+    }
+    
+    // Always connect with MetaMask
+    const success = await connect('metamask')
+    
+    if (success) {
       setTimeout(() => {
         onClose()
       }, 500)
     }
   }
-
-  const popularWallets = wallets.filter(w => w.popular)
-  const otherWallets = wallets.filter(w => !w.popular)
 
   if (!isOpen) return null
 
@@ -99,7 +86,7 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
             </div>
             <div>
               <h3 className="text-lg font-bold text-text-primary">Connect Wallet</h3>
-              <p className="text-xs text-text-muted">Choose your preferred wallet</p>
+              <p className="text-xs text-text-muted">Scan QR code with MetaMask app</p>
             </div>
           </div>
           <button
@@ -110,42 +97,28 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
           </button>
         </div>
 
-        {/* Wallet List */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {/* Popular wallets */}
-          <div>
-            <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
-              Popular
-            </h4>
-            <div className="grid grid-cols-1 gap-2">
-              {popularWallets.map((wallet) => (
-                <WalletButton
-                  key={wallet.id}
-                  wallet={wallet}
-                  connecting={isConnecting && walletType === wallet.id}
-                  connected={isConnected && walletType === wallet.id}
-                  onClick={() => handleConnect(wallet)}
-                />
-              ))}
-            </div>
+        {/* Wallet List - MetaMask Only */}
+        <div className="flex-1 overflow-y-auto p-5">
+          <div className="grid grid-cols-1 gap-2">
+            {wallets.map((wallet) => (
+              <WalletButton
+                key={wallet.id}
+                wallet={wallet}
+                connecting={isConnecting && walletType === wallet.id}
+                connected={isConnected && walletType === wallet.id}
+                onClick={() => handleConnect(wallet)}
+              />
+            ))}
           </div>
-
-          {/* Other wallets */}
-          <div>
-            <h4 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
-              More Options
-            </h4>
-            <div className="grid grid-cols-2 gap-2">
-              {otherWallets.map((wallet) => (
-                <WalletButtonCompact
-                  key={wallet.id}
-                  wallet={wallet}
-                  connecting={isConnecting && walletType === wallet.id}
-                  connected={isConnected && walletType === wallet.id}
-                  onClick={() => handleConnect(wallet)}
-                />
-              ))}
-            </div>
+          
+          {/* Instructions */}
+          <div className="mt-6 p-4 bg-bg-secondary/50 rounded-xl border border-border/50">
+            <h4 className="text-sm font-semibold text-text-primary mb-2">How to connect:</h4>
+            <ol className="text-xs text-text-muted space-y-1.5">
+              <li>1. Click the MetaMask button above</li>
+              <li>2. Scan the QR code with your MetaMask mobile app</li>
+              <li>3. Approve the connection in MetaMask</li>
+            </ol>
           </div>
         </div>
 
@@ -203,35 +176,6 @@ function WalletButton({ wallet, connecting, connected, onClick }: WalletButtonPr
           <ExternalLink className="w-4 h-4 text-text-muted" />
         )}
       </div>
-    </button>
-  )
-}
-
-function WalletButtonCompact({ wallet, connecting, connected, onClick }: WalletButtonProps) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={connecting || connected}
-      className={`
-        flex items-center gap-3 p-3 rounded-xl border transition-all
-        ${connected 
-          ? 'bg-accent-success/10 border-accent-success' 
-          : 'bg-bg-secondary border-border hover:border-accent-primary/50 hover:bg-bg-tertiary'
-        }
-        disabled:opacity-70
-      `}
-    >
-      <div className="w-10 h-10 rounded-lg overflow-hidden flex items-center justify-center">
-        <WalletIcon walletId={wallet.id} className="w-10 h-10" />
-      </div>
-      <div className="flex-1 text-left min-w-0">
-        <div className="font-medium text-text-primary text-sm truncate">{wallet.name}</div>
-      </div>
-      {connecting ? (
-        <Loader2 className="w-4 h-4 text-accent-primary animate-spin flex-shrink-0" />
-      ) : connected ? (
-        <Check className="w-4 h-4 text-accent-success flex-shrink-0" />
-      ) : null}
     </button>
   )
 }

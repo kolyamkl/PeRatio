@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { TrendingUp, TrendingDown, ArrowUpDown, Plus, X } from 'lucide-react'
+import { ArrowUpDown, Plus, X } from 'lucide-react'
 import type { Coin } from '../lib/mockData'
 import { formatCurrency } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'

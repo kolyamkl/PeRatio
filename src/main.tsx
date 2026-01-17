@@ -11,25 +11,21 @@ initTelegram()
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <MetaMaskProvider
-      debug={false}
+      debug={true}
       sdkOptions={{
         dappMetadata: {
           name: 'TG Trade',
           url: window.location.origin,
         },
-        // Enable QR code modal for Telegram and mobile
-        modals: {
-          install: ({ link }) => {
-            window.open(link, '_blank')
-            return {
-              mount: () => {},
-              unmount: () => {},
-            }
-          },
-        },
         enableAnalytics: false,
         checkInstallationImmediately: false,
         preferDesktop: false,
+        useDeeplink: true,
+        // Force QR modal for mobile environments
+        openDeeplink: (link: string) => {
+          console.log('MetaMask deeplink:', link)
+          window.open(link, '_blank')
+        },
       }}
     >
       <App />

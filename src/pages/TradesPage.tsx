@@ -5,11 +5,7 @@ import {
   Inbox, 
   Search, 
   Filter,
-  TrendingUp,
-  TrendingDown,
-  Activity,
   Zap,
-  Clock,
   BarChart3
 } from 'lucide-react'
 import { TopBar } from '../components/TopBar'

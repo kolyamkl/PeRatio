@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AlertTriangle, Minus, Plus } from 'lucide-react'
-import { formatPercent, formatLeverage } from '../lib/mockData'
+import { formatLeverage } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'
 
 interface ParamsCardProps {

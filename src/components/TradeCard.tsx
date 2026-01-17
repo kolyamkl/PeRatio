@@ -4,12 +4,6 @@ import {
   TrendingUp, 
   TrendingDown, 
   Clock, 
-  Target, 
-  Shield, 
-  Zap,
-  Activity,
-  BarChart3,
-  Timer,
   CheckCircle2,
   XCircle
 } from 'lucide-react'
