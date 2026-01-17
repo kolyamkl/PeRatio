@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Wallet, Sparkles } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { BalanceCard } from '../components/BalanceCard'
@@ -17,6 +17,8 @@ import { useWallet } from '../lib/wallet'
 export function TradeConfirmPage() {
   const [isWalletModalOpen, setIsWalletModalOpen] = useState(false)
   const { isConnected, walletType, displayAddress, disconnect, balance, currency } = useWallet()
+  // Use current backend tunnel
+  const backendUrl = 'https://rare-pets-clean.loca.lt'
 
   // Trade parameters state
   const [stopLoss, setStopLoss] = useState(presetTrade.risk.stopLossPct)
@@ -37,6 +39,47 @@ export function TradeConfirmPage() {
   const [shortCoins, setShortCoins] = useState<Coin[]>([
     getInitialCoin(presetTrade.shortCoin.ticker)
   ])
+
+  // Prefill from backend tradeId if present
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const tradeId = params.get('tradeId')
+    if (!tradeId) return
+
+    let cancelled = false
+    const fetchTrade = async () => {
+      try {
+        const res = await fetch(`${backendUrl}/api/trades/${tradeId}`)
+        if (!res.ok) return
+        const trade = await res.json()
+        if (cancelled) return
+
+        const longLeg = trade?.pair?.long
+        const shortLeg = trade?.pair?.short
+        if (longLeg?.symbol) {
+          setLongCoins([getInitialCoin(longLeg.symbol)])
+        }
+        if (shortLeg?.symbol) {
+          setShortCoins([getInitialCoin(shortLeg.symbol)])
+        }
+        if (longLeg?.leverage != null) {
+          setLeverage(Number(longLeg.leverage))
+        }
+        if (trade?.takeProfitRatio != null) {
+          setTakeProfit(Math.abs(Number(trade.takeProfitRatio) * 100))
+        }
+        if (trade?.stopLossRatio != null) {
+          setStopLoss(Math.abs(Number(trade.stopLossRatio) * 100))
+        }
+      } catch (err) {
+        console.error('Failed to load trade', err)
+      }
+    }
+    fetchTrade()
+    return () => {
+      cancelled = true
+    }
+  }, [backendUrl])
 
   const handleSwap = () => {
     const tempLong = [...longCoins]
