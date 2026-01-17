@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pear Protocol Auth</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .container {
+      background: white;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      max-width: 500px;
+      width: 100%;
+      padding: 40px;
+    }
+    h1 {
+      color: #333;
+      margin-bottom: 10px;
+      font-size: 28px;
+    }
+    .subtitle {
+      color: #666;
+      margin-bottom: 30px;
+      font-size: 14px;
+    }
+    .status {
+      background: #f5f5f5;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+      font-size: 14px;
+      color: #666;
+    }
+    .status.connected {
+      background: #d4edda;
+      color: #155724;
+    }
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+    }
+    button {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 10px;
+      transition: transform 0.2s;
+    }
+    button:hover:not(:disabled) {
+      transform: translateY(-2px);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .token-display {
+      background: #f5f5f5;
+      border-radius: 8px;
+      padding: 15px;
+      margin-top: 20px;
+      word-break: break-all;
+      font-size: 12px;
+      font-family: monospace;
+    }
+    .token-label {
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🍐 Pear Protocol</h1>
+    <p class="subtitle">Connect wallet to authenticate (no private key needed!)</p>
+
+    <div id="status" class="status">
+      Not connected. Please connect your wallet.
+    </div>
+
+    <button id="connectBtn" onclick="connectWallet()">
+      Connect Wallet
+    </button>
+
+    <button id="authBtn" onclick="authenticate()" disabled>
+      Authenticate with Pear Protocol
+    </button>
+
+    <div id="tokenDisplay"></div>
+  </div>
+
+  <script>
+    const API_URL = "https://hl-v2.pearprotocol.io";
+    const CLIENT_ID = "HLHackathon9";
+
+    let currentAddress = null;
+    let accessToken = null;
+
+    async function connectWallet() {
+      const statusEl = document.getElementById("status");
+      const connectBtn = document.getElementById("connectBtn");
+      const authBtn = document.getElementById("authBtn");
+
+      try {
+        if (!window.ethereum) {
+          throw new Error("MetaMask not installed!");
+        }
+
+        connectBtn.textContent = "Connecting...";
+        connectBtn.disabled = true;
+
+        const accounts = await window.ethereum.request({ 
+          method: 'eth_requestAccounts' 
+        });
+        
+        currentAddress = accounts[0];
+        
+        statusEl.textContent = `✅ Connected: ${currentAddress}`;
+        statusEl.className = "status connected";
+        
+        connectBtn.textContent = "Wallet Connected ✓";
+        authBtn.disabled = false;
+
+      } catch (error) {
+        console.error("Connection failed:", error);
+        statusEl.textContent = `❌ Error: ${error.message}`;
+        statusEl.className = "status error";
+        connectBtn.textContent = "Connect Wallet";
+        connectBtn.disabled = false;
+      }
+    }
+
+    async function authenticate() {
+      const statusEl = document.getElementById("status");
+      const authBtn = document.getElementById("authBtn");
+      const tokenDisplay = document.getElementById("tokenDisplay");
+
+      try {
+        authBtn.textContent = "Authenticating...";
+        authBtn.disabled = true;
+
+        // Step 1: Get EIP-712 message
+        statusEl.textContent = "📝 Getting message to sign...";
+        const msgResponse = await fetch(
+          `${API_URL}/auth/eip712-message?address=${currentAddress}&clientId=${CLIENT_ID}`
+        );
+        const eipData = await msgResponse.json();
+
+        console.log("Step 1 - EIP-712 Message:", eipData);
+
+        // Step 2: Sign the message
+        statusEl.textContent = "✍️ Please sign the message in your wallet...";
+        
+        const { EIP712Domain, ...types } = eipData.types;
+
+        const signature = await window.ethereum.request({
+          method: 'eth_signTypedData_v4',
+          params: [
+            currentAddress,
+            JSON.stringify({
+              domain: eipData.domain,
+              types: types,
+              primaryType: eipData.primaryType,
+              message: eipData.message,
+            }),
+          ],
+        });
+
+        console.log("Step 2 - Signature:", signature);
+
+        // Step 3: Authenticate
+        statusEl.textContent = "🔐 Authenticating...";
+        const loginResponse = await fetch(`${API_URL}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            method: "eip712",
+            address: currentAddress,
+            clientId: CLIENT_ID,
+            details: {
+              signature: signature,
+              timestamp: eipData.timestamp,
+            },
+          }),
+        });
+
+        const tokens = await loginResponse.json();
+        console.log("Step 3 - Tokens:", tokens);
+        
+        accessToken = tokens.accessToken;
+
+        statusEl.textContent = `✅ Authenticated as ${tokens.address}`;
+        statusEl.className = "status connected";
+
+        tokenDisplay.innerHTML = `
+          <div class="token-label">✅ Access Token:</div>
+          <div>${tokens.accessToken.substring(0, 100)}...</div>
+          <div class="token-label" style="margin-top:10px;">Expires In:</div>
+          <div>${tokens.expiresIn} seconds</div>
+        `;
+
+        authBtn.textContent = "✅ Authenticated!";
+
+      } catch (error) {
+        console.error("Authentication failed:", error);
+        statusEl.textContent = `❌ Error: ${error.message}`;
+        statusEl.className = "status error";
+        authBtn.textContent = "Authenticate with Pear Protocol";
+        authBtn.disabled = false;
+      }
+    }
+
+    // Auto-connect if already authorized
+    if (window.ethereum && window.ethereum.selectedAddress) {
+      connectWallet();
+    }
+  </script>
+</body>
+</html>
+

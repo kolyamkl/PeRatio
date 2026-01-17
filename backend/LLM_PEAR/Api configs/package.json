@@ -1,0 +1,30 @@
+{
+  "name": "pear-auth",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/create-agent-wallet.ts",
+    "status": "tsx src/check-agent-status.ts",
+    "order": "tsx src/place-order.ts",
+    "order:adv": "tsx src/place-order-advanced.ts",
+    "trade": "tsx src/trading-operations.ts",
+    "approve:agent": "tsx src/approve-agent-wallet.ts",
+    "approve:builder": "tsx src/approve-builder-fees.ts",
+    "example:simple": "tsx src/examples/simple-example.ts",
+    "example:api": "tsx src/examples/api-client-example.ts",
+    "example:bot": "tsx src/examples/custom-trading-script.ts"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "@nktkas/hyperliquid": "^0.30.2",
+    "viem": "^2.21.45"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
+
