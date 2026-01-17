@@ -81,7 +81,7 @@ export function ParamsCard({
                 if (!isNaN(val) && val >= 0 && val <= 100) {
                   setLocalLongPct(val)
                   onProportionChange?.(val)
-                  hapticFeedback('light')
+                  hapticFeedback('selection')
                 }
               }}
               onBlur={(e) => {
@@ -178,7 +178,7 @@ export function ParamsCard({
                     if (!isNaN(val) && val >= 0.1 && val <= 50) {
                       setLocalStopLoss(val)
                       onRiskChange?.(val, localTakeProfit)
-                      hapticFeedback('light')
+                      hapticFeedback('selection')
                     }
                   }}
                   onBlur={(e) => {
@@ -221,7 +221,7 @@ export function ParamsCard({
                     if (!isNaN(val) && val >= 0.1 && val <= 100) {
                       setLocalTakeProfit(val)
                       onRiskChange?.(localStopLoss, val)
-                      hapticFeedback('light')
+                      hapticFeedback('selection')
                     }
                   }}
                   onBlur={(e) => {

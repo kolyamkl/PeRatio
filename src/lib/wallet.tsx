@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
 import { TonConnectUI, THEME, Wallet } from '@tonconnect/ui-react'
-import { hapticFeedback } from './telegram'
+import { useSDK } from '@metamask/sdk-react'
+import { hapticFeedback, isRunningInTelegram } from './telegram'
 
 // Wallet types
 export type WalletType = 'tonconnect' | 'phantom' | 'metamask' | 'walletconnect' | 'coinbase' | 'trust' | 'rainbow' | 'okx' | 'rabby'
@@ -237,6 +238,9 @@ export function WalletProvider({ children }: WalletProviderProps) {
     currency: 'USD',
     displayAddress: null,
   })
+  
+  // MetaMask SDK for QR code support
+  const { sdk, connected, account } = useSDK()
 
   // Re-request wallet providers on mount
   useEffect(() => {
@@ -349,6 +353,37 @@ export function WalletProvider({ children }: WalletProviderProps) {
     }
   }, [])
 
+  // Handle MetaMask SDK connection events
+  useEffect(() => {
+    if (connected && account && state.walletType === 'metamask') {
+      console.log('MetaMask SDK connected:', account)
+      
+      // Update wallet state
+      const updateBalance = async () => {
+        try {
+          const provider = sdk?.getProvider()
+          if (provider) {
+            const balance = await getEthBalance(provider as unknown as EIP1193Provider, account)
+            setState({
+              isConnected: true,
+              isConnecting: false,
+              address: account,
+              walletType: 'metamask',
+              balance,
+              currency: 'ETH',
+              displayAddress: shortenAddress(account),
+            })
+            hapticFeedback('notification', 'success')
+          }
+        } catch (error) {
+          console.error('Error fetching balance:', error)
+        }
+      }
+      
+      updateBalance()
+    }
+  }, [connected, account, sdk, state.walletType])
+
   // Check for existing browser wallet connections on mount
   useEffect(() => {
     const checkExistingConnections = async () => {
@@ -445,19 +480,68 @@ export function WalletProvider({ children }: WalletProviderProps) {
 
         case 'metamask': {
           console.log('Attempting MetaMask connection...')
-          console.log('Discovered wallets:', Array.from(discoveredWallets.keys()))
+          const inTelegram = isRunningInTelegram()
+          console.log('Running in Telegram:', inTelegram)
           
-          // Get MetaMask provider using EIP-6963 or fallback
-          const ethereum = await getMetaMaskProvider()
-          
-          if (!ethereum) {
-            console.log('No MetaMask provider found')
+          // Use MetaMask SDK for Telegram/mobile, browser extension for desktop
+          if (inTelegram || !window.ethereum) {
+            console.log('Using MetaMask SDK...')
             
-            // Check if we're likely missing the extension vs it just not being detected
-            const hasWindowEthereum = typeof window !== 'undefined' && 'ethereum' in window
+            if (!sdk) {
+              console.error('MetaMask SDK not initialized')
+              alert('MetaMask SDK not available. Please refresh the page.')
+              setState(prev => ({ ...prev, isConnecting: false }))
+              return false
+            }
+
+            try {
+              // Connect via SDK - SDK will show its own QR modal for mobile
+              console.log('Calling SDK connect...')
+              const accounts = await sdk.connect()
+              
+              console.log('SDK connected, accounts:', accounts)
+              
+              if (accounts && accounts.length > 0) {
+                const address = accounts[0]
+                const provider = sdk.getProvider()
+                
+                if (provider) {
+                  const balance = await getEthBalance(provider as unknown as EIP1193Provider, address)
+                  
+                  setState({
+                    isConnected: true,
+                    isConnecting: false,
+                    address,
+                    walletType: 'metamask',
+                    balance,
+                    currency: 'ETH',
+                    displayAddress: shortenAddress(address),
+                  })
+                  
+                  hapticFeedback('notification', 'success')
+                  return true
+                }
+              }
+              
+              // If we got here, connection failed
+              setState(prev => ({ ...prev, isConnecting: false }))
+              return false
+              
+            } catch (err) {
+              console.error('MetaMask SDK connection error:', err)
+              setState(prev => ({ ...prev, isConnecting: false }))
+              return false
+            }
+          } else {
+            // Desktop browser - use extension
+            console.log('Using browser extension...')
+            console.log('Discovered wallets:', Array.from(discoveredWallets.keys()))
             
-            if (!hasWindowEthereum) {
-              // Show a more helpful alert before redirecting
+            const ethereum = await getMetaMaskProvider()
+            
+            if (!ethereum) {
+              console.log('No MetaMask provider found')
+              
               const shouldDownload = window.confirm(
                 'MetaMask not detected!\n\n' +
                 'If you have MetaMask installed:\n' +
@@ -470,41 +554,37 @@ export function WalletProvider({ children }: WalletProviderProps) {
               if (shouldDownload) {
                 window.open('https://metamask.io/download/', '_blank')
               }
+              
+              setState(prev => ({ ...prev, isConnecting: false }))
+              return false
             }
-            
-            setState(prev => ({ ...prev, isConnecting: false }))
-            return false
-          }
 
-          try {
-            console.log('Requesting accounts from MetaMask...')
-            // Request accounts - this will trigger MetaMask popup
-            const accounts = await ethereum.request({ method: 'eth_requestAccounts' }) as string[]
-            console.log('Accounts received:', accounts)
-            
-            if (accounts && accounts.length > 0) {
-              const address = accounts[0]
+            try {
+              console.log('Requesting accounts from MetaMask...')
+              const accounts = await ethereum.request({ method: 'eth_requestAccounts' }) as string[]
+              console.log('Accounts received:', accounts)
               
-              // Fetch real ETH balance
-              const balance = await getEthBalance(ethereum, address)
-              
-              setState({
-                isConnected: true,
-                isConnecting: false,
-                address,
-                walletType: 'metamask',
-                balance,
-                currency: 'ETH',
-                displayAddress: shortenAddress(address),
-              })
-              hapticFeedback('notification', 'success')
-              return true
+              if (accounts && accounts.length > 0) {
+                const address = accounts[0]
+                const balance = await getEthBalance(ethereum, address)
+                
+                setState({
+                  isConnected: true,
+                  isConnecting: false,
+                  address,
+                  walletType: 'metamask',
+                  balance,
+                  currency: 'ETH',
+                  displayAddress: shortenAddress(address),
+                })
+                hapticFeedback('notification', 'success')
+                return true
+              }
+            } catch (err) {
+              console.error('MetaMask connection error:', err)
+              setState(prev => ({ ...prev, isConnecting: false }))
+              return false
             }
-          } catch (err) {
-            console.error('MetaMask connection error:', err)
-            // User rejected or other error
-            setState(prev => ({ ...prev, isConnecting: false }))
-            return false
           }
           break
         }
@@ -543,7 +623,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
 
     setState(prev => ({ ...prev, isConnecting: false }))
     return false
-  }, [tonConnectUI])
+  }, [tonConnectUI, sdk])
 
   const disconnect = useCallback(async () => {
     hapticFeedback('impact', 'light')
@@ -565,7 +645,15 @@ export function WalletProvider({ children }: WalletProviderProps) {
         }
 
         case 'metamask':
-          // MetaMask doesn't have a disconnect method, just clear state
+          // Disconnect MetaMask SDK if connected via SDK
+          if (sdk && connected) {
+            try {
+              await sdk.terminate()
+            } catch (error) {
+              console.error('Error terminating MetaMask SDK:', error)
+            }
+          }
+          // MetaMask extension doesn't have a disconnect method, just clear state
           break
 
         default:
@@ -585,7 +673,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
       currency: 'USD',
       displayAddress: null,
     })
-  }, [state.walletType, tonConnectUI])
+  }, [state.walletType, tonConnectUI, sdk, connected])
 
   // Refresh balance for current wallet
   const refreshBalance = useCallback(async () => {
@@ -623,7 +711,13 @@ export function WalletProvider({ children }: WalletProviderProps) {
   }, [state.isConnected, state.address, state.walletType])
 
   return (
-    <WalletContext.Provider value={{ ...state, connect, disconnect, refreshBalance, tonConnectUI }}>
+    <WalletContext.Provider value={{ 
+      ...state, 
+      connect, 
+      disconnect, 
+      refreshBalance, 
+      tonConnectUI,
+    }}>
       {children}
     </WalletContext.Provider>
   )

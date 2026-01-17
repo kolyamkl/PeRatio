@@ -111,8 +111,8 @@ export function isRunningInTelegram(): boolean {
   // - initData is populated when inside Telegram (empty string when not)
   // - platform is a specific value (not "unknown") when in Telegram
   const tgAny = tg as unknown as { initData?: string; platform?: string }
-  const hasInitData = tgAny.initData && tgAny.initData.length > 0
-  const hasValidPlatform = tgAny.platform && tgAny.platform !== 'unknown'
+  const hasInitData = !!(tgAny.initData && tgAny.initData.length > 0)
+  const hasValidPlatform = !!(tgAny.platform && tgAny.platform !== 'unknown')
   
   return hasInitData || hasValidPlatform
 }
