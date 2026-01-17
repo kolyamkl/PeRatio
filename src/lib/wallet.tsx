@@ -135,10 +135,11 @@ export function WalletProvider({ children }: WalletProviderProps) {
     checkExistingConnection()
   }, [])
 
-  // Handle MetaMask SDK connection events
+  // Handle MetaMask SDK connection events (for reconnection scenarios only)
   useEffect(() => {
-    if (connected && account && state.walletType === 'metamask') {
-      console.log('MetaMask SDK connected:', account)
+    // Only update if SDK is connected but our state shows disconnected
+    if (connected && account && !state.isConnected) {
+      console.log('MetaMask SDK reconnected:', account)
       
       const updateBalance = async () => {
         try {
@@ -163,7 +164,20 @@ export function WalletProvider({ children }: WalletProviderProps) {
       
       updateBalance()
     }
-  }, [connected, account, sdk, state.walletType])
+    // Handle SDK disconnection
+    else if (!connected && state.isConnected && state.walletType === 'metamask') {
+      console.log('MetaMask SDK disconnected')
+      setState({
+        isConnected: false,
+        isConnecting: false,
+        address: null,
+        walletType: null,
+        balance: 0,
+        currency: 'USD',
+        displayAddress: null,
+      })
+    }
+  }, [connected, account, sdk, state.isConnected, state.walletType])
 
   const connect = useCallback(async (walletType: WalletType): Promise<boolean> => {
     if (walletType !== 'metamask') {
@@ -171,7 +185,12 @@ export function WalletProvider({ children }: WalletProviderProps) {
       return false
     }
 
-    setState(prev => ({ ...prev, isConnecting: true }))
+    // Reset state to allow reconnection
+    setState(prev => ({ 
+      ...prev, 
+      isConnecting: true,
+      isConnected: false 
+    }))
     hapticFeedback('impact', 'medium')
 
     try {
