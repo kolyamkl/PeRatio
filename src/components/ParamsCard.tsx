@@ -21,11 +21,9 @@ interface ParamsCardProps {
 }
 
 export function ParamsCard({ 
-  proportion, 
   risk, 
   leverage,
   betAmount = 20,
-  onProportionChange,
   onRiskChange,
   onLeverageChange,
   onBetAmountChange
@@ -33,7 +31,6 @@ export function ParamsCard({
   const [localStopLoss, setLocalStopLoss] = useState(risk.stopLossPct)
   const [localTakeProfit, setLocalTakeProfit] = useState(risk.takeProfitPct)
   const [localLeverage, setLocalLeverage] = useState(leverage)
-  const [localLongPct, setLocalLongPct] = useState(proportion.longPct)
   const [localBetAmount, setLocalBetAmount] = useState(betAmount)
 
   // Sync local state with prop changes (e.g., from URL params)
@@ -52,13 +49,6 @@ export function ParamsCard({
   useEffect(() => {
     setLocalBetAmount(betAmount)
   }, [betAmount])
-
-  const handleLongPctChange = (delta: number) => {
-    hapticFeedback('selection')
-    const newValue = Math.max(10, Math.min(90, localLongPct + delta))
-    setLocalLongPct(newValue)
-    onProportionChange?.(newValue)
-  }
 
   const handleStopLossChange = (delta: number) => {
     hapticFeedback('selection')

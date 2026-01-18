@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { 
   ChevronDown, 
   TrendingUp, 
@@ -16,6 +16,12 @@ import {
 } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'
 
+interface Ripple {
+  id: number
+  x: number
+  y: number
+}
+
 interface TradeCardProps {
   trade: Trade
   index?: number
@@ -23,14 +29,27 @@ interface TradeCardProps {
 
 export function TradeCard({ trade, index = 0 }: TradeCardProps) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const [ripples, setRipples] = useState<Ripple[]>([])
   
   const isProfitable = trade.pnlUsd >= 0
   const isOpen = trade.status === 'open'
   
-  const handleToggle = () => {
+  const handleToggle = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     hapticFeedback('selection')
+    
+    // Create ripple effect at click position
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const newRipple = { id: Date.now(), x, y }
+    
+    setRipples(prev => [...prev, newRipple])
+    setTimeout(() => {
+      setRipples(prev => prev.filter(r => r.id !== newRipple.id))
+    }, 600)
+    
     setIsExpanded(!isExpanded)
-  }
+  }, [isExpanded])
 
   // Format time ago
   const getTimeAgo = (dateStr: string) => {
@@ -47,9 +66,25 @@ export function TradeCard({ trade, index = 0 }: TradeCardProps) {
   
   return (
     <div 
-      className="card overflow-hidden stagger-item group"
+      className="card overflow-hidden stagger-item group relative cursor-pointer"
       style={{ animationDelay: `${index * 80}ms` }}
+      onClick={handleToggle}
     >
+      {/* Ripple effects */}
+      {ripples.map(ripple => (
+        <span
+          key={ripple.id}
+          className="absolute rounded-full pointer-events-none animate-ripple z-10"
+          style={{
+            left: ripple.x - 50,
+            top: ripple.y - 50,
+            width: 100,
+            height: 100,
+            backgroundColor: isProfitable ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)',
+          }}
+        />
+      ))}
+      
       {/* Header with pair tokens - Pear style */}
       <div className="p-4 pb-0">
         <div className="flex items-center justify-between mb-3">
@@ -83,9 +118,8 @@ export function TradeCard({ trade, index = 0 }: TradeCardProps) {
         </div>
       </div>
 
-      {/* Main clickable area */}
-      <button 
-        onClick={handleToggle}
+      {/* Main content area */}
+      <div 
         className="w-full p-4 pt-0 text-left"
       >
         {/* Quick Stats Grid - Pear style */}
@@ -178,7 +212,7 @@ export function TradeCard({ trade, index = 0 }: TradeCardProps) {
             <ChevronDown className="w-4 h-4 text-text-muted" />
           </div>
         )}
-      </button>
+      </div>
       
       {/* Expanded details */}
       <div 

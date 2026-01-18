@@ -2,6 +2,7 @@ import { useState, useRef } from 'react'
 import { Loader2, Check, Sparkles, Wallet } from 'lucide-react'
 import { hapticFeedback } from '../lib/telegram'
 import { useToast } from './Toast'
+import { Confetti } from './Confetti'
 
 type ConfirmState = 'idle' | 'submitting' | 'confirmed'
 
@@ -33,6 +34,7 @@ const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
 export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyConfirmProps) {
   const [state, setState] = useState<ConfirmState>('idle')
   const [ripple, setRipple] = useState<{ x: number; y: number } | null>(null)
+  const [showConfetti, setShowConfetti] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const { showToast } = useToast()
   
@@ -134,6 +136,8 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyCo
         console.log('[StickyConfirm]   Result:', result)
         
         setState('confirmed')
+        setShowConfetti(true)
+        setTimeout(() => setShowConfetti(false), 3500)
         try { hapticFeedback('notification', 'success') } catch {}
         showToast('Trade executed via Pear Protocol!', 'success')
       } else {
@@ -143,6 +147,8 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyCo
         console.log('[StickyConfirm]   tradeData:', tradeData)
         await new Promise(resolve => setTimeout(resolve, 1500))
         setState('confirmed')
+        setShowConfetti(true)
+        setTimeout(() => setShowConfetti(false), 3500)
         try { hapticFeedback('notification', 'success') } catch {}
         showToast('Trade submitted (demo)', 'success')
       }
@@ -240,9 +246,13 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyCo
   }
   
   return (
-    <div className="sticky bottom-0 left-0 right-0 p-4 safe-bottom z-20">
-      {/* Glassmorphism background */}
-      <div className="absolute inset-0 bg-gradient-to-t from-bg-primary via-bg-primary/95 to-transparent backdrop-blur-sm" />
+    <>
+      {/* Confetti celebration on successful trade */}
+      <Confetti isActive={showConfetti} duration={3000} particleCount={60} />
+      
+      <div className="sticky bottom-0 left-0 right-0 p-4 safe-bottom z-20">
+        {/* Glassmorphism background */}
+        <div className="absolute inset-0 bg-gradient-to-t from-bg-primary via-bg-primary/95 to-transparent backdrop-blur-sm" />
       
       <div className="relative">
         <button
@@ -307,6 +317,7 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyCo
           to { stroke-dashoffset: 0; }
         }
       `}</style>
-    </div>
+      </div>
+    </>
   )
 }

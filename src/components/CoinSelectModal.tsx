@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Search, TrendingUp, TrendingDown, Star, Flame, Cpu, Coins, Gamepad2, Layers } from 'lucide-react'
 import { type Coin } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'
+import { fetchPrices, formatPrice } from '../lib/priceService'
 
 // Coin icons as simple colored circles with letters or symbols
 const CoinIcon = ({ ticker, size = 32 }: { ticker: string; size?: number }) => {
@@ -11,6 +12,8 @@ const CoinIcon = ({ ticker, size = 32 }: { ticker: string; size?: number }) => {
     ETH: 'bg-blue-500',
     SOL: 'bg-gradient-to-br from-purple-500 to-cyan-400',
     AVAX: 'bg-red-500',
+    ARB: 'bg-blue-400',
+    OP: 'bg-red-500',
     DOT: 'bg-pink-500',
     LINK: 'bg-blue-600',
     MATIC: 'bg-purple-600',
@@ -33,11 +36,20 @@ const CoinIcon = ({ ticker, size = 32 }: { ticker: string; size?: number }) => {
     ATOM: 'bg-purple-700',
     UNI: 'bg-pink-600',
     AAVE: 'bg-cyan-600',
-    AAPL: 'bg-gray-300',
-    TSLA: 'bg-red-500',
-    GOOGL: 'bg-blue-500',
-    MSFT: 'bg-green-500',
-    NVDA: 'bg-green-600',
+    SUI: 'bg-blue-500',
+    APT: 'bg-black',
+    SEI: 'bg-red-400',
+    INJ: 'bg-blue-600',
+    TIA: 'bg-purple-500',
+    NEAR: 'bg-black',
+    TAO: 'bg-black',
+    WLD: 'bg-black',
+    PEPE: 'bg-green-500',
+    WIF: 'bg-amber-500',
+    BONK: 'bg-orange-500',
+    FLOKI: 'bg-yellow-600',
+    RNDR: 'bg-red-500',
+    FET: 'bg-purple-500',
   }
 
   const bgColor = colors[ticker] || 'bg-accent-primary/20'
@@ -67,6 +79,8 @@ const allCoinsData: (Coin & { category: string[] })[] = [
   { name: 'Ethereum', ticker: 'ETH', price: 2450.00, category: ['all', 'hot', 'defi'] },
   { name: 'Solana', ticker: 'SOL', price: 98.50, category: ['all', 'hot', 'hip3'] },
   { name: 'Avalanche', ticker: 'AVAX', price: 35.80, category: ['all', 'hot'] },
+  { name: 'Arbitrum', ticker: 'ARB', price: 0.80, category: ['all', 'hot', 'defi'] },
+  { name: 'Optimism', ticker: 'OP', price: 1.80, category: ['all', 'hot', 'defi'] },
   { name: 'Polkadot', ticker: 'DOT', price: 7.25, category: ['all', 'defi'] },
   { name: 'Chainlink', ticker: 'LINK', price: 14.80, category: ['all', 'defi', 'ai'] },
   { name: 'Polygon', ticker: 'MATIC', price: 0.85, category: ['all', 'defi'] },
@@ -75,6 +89,12 @@ const allCoinsData: (Coin & { category: string[] })[] = [
   { name: 'Cosmos', ticker: 'ATOM', price: 9.50, category: ['all', 'defi'] },
   { name: 'Uniswap', ticker: 'UNI', price: 6.25, category: ['all', 'defi'] },
   { name: 'Aave', ticker: 'AAVE', price: 92.30, category: ['all', 'defi'] },
+  { name: 'Sui', ticker: 'SUI', price: 1.20, category: ['all', 'hot', 'hip3'] },
+  { name: 'Aptos', ticker: 'APT', price: 8.50, category: ['all', 'hot', 'hip3'] },
+  { name: 'Sei', ticker: 'SEI', price: 0.45, category: ['all', 'hot', 'hip3'] },
+  { name: 'Injective', ticker: 'INJ', price: 22.50, category: ['all', 'hot', 'defi'] },
+  { name: 'Celestia', ticker: 'TIA', price: 8.20, category: ['all', 'hot'] },
+  { name: 'Near', ticker: 'NEAR', price: 4.80, category: ['all', 'defi'] },
   // Gaming
   { name: 'ApeCoin', ticker: 'APE', price: 1.85, category: ['all', 'gaming'] },
   { name: 'Yield Guild', ticker: 'YGG', price: 0.72, category: ['all', 'gaming'] },
@@ -93,15 +113,15 @@ const allCoinsData: (Coin & { category: string[] })[] = [
   { name: 'Fetch.ai', ticker: 'FET', price: 2.30, category: ['all', 'ai'] },
   { name: 'Ocean', ticker: 'OCEAN', price: 0.95, category: ['all', 'ai'] },
   { name: 'SingularityNET', ticker: 'AGIX', price: 0.88, category: ['all', 'ai'] },
+  { name: 'Bittensor', ticker: 'TAO', price: 450.00, category: ['all', 'ai', 'hot'] },
+  { name: 'Worldcoin', ticker: 'WLD', price: 2.20, category: ['all', 'ai'] },
   // Memes
   { name: 'Dogecoin', ticker: 'DOGE', price: 0.082, category: ['all', 'hot'] },
   { name: 'Shiba Inu', ticker: 'SHIB', price: 0.000025, category: ['all', 'hot'] },
-  // Stocks
-  { name: 'Apple', ticker: 'AAPL', price: 185.50, category: ['all', 'stocks'] },
-  { name: 'Tesla', ticker: 'TSLA', price: 245.80, category: ['all', 'stocks'] },
-  { name: 'Google', ticker: 'GOOGL', price: 142.30, category: ['all', 'stocks'] },
-  { name: 'Microsoft', ticker: 'MSFT', price: 378.90, category: ['all', 'stocks'] },
-  { name: 'Nvidia', ticker: 'NVDA', price: 495.20, category: ['all', 'stocks', 'ai'] },
+  { name: 'Pepe', ticker: 'PEPE', price: 0.000012, category: ['all', 'hot'] },
+  { name: 'Dogwifhat', ticker: 'WIF', price: 2.50, category: ['all', 'hot'] },
+  { name: 'Bonk', ticker: 'BONK', price: 0.000025, category: ['all', 'hot'] },
+  { name: 'Floki', ticker: 'FLOKI', price: 0.00018, category: ['all', 'hot'] },
 ]
 
 const categories = [
@@ -118,6 +138,17 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
   const [searchQuery, setSearchQuery] = useState('')
   const [activeCategory, setActiveCategory] = useState('all')
   const [favorites, setFavorites] = useState<string[]>(['BTC', 'ETH', 'SOL'])
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({})
+
+  // Fetch real-time prices when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      const tickers = allCoinsData.map(c => c.ticker)
+      fetchPrices(tickers).then(prices => {
+        setLivePrices(prices)
+      })
+    }
+  }, [isOpen])
 
   const filteredCoins = useMemo(() => {
     let coins = allCoinsData.filter(coin => !excludeCoins.includes(coin.ticker))
@@ -138,8 +169,12 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
       )
     }
     
-    return coins
-  }, [searchQuery, activeCategory, favorites, excludeCoins])
+    // Update prices with live data
+    return coins.map(coin => ({
+      ...coin,
+      price: livePrices[coin.ticker] ?? coin.price
+    }))
+  }, [searchQuery, activeCategory, favorites, excludeCoins, livePrices])
 
   const toggleFavorite = (ticker: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -291,7 +326,7 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
                     <p className="font-bold text-text-primary truncate">{coin.ticker}</p>
                     {coin.price && (
                       <p className="text-xs text-text-muted truncate">
-                        ${coin.price < 1 ? coin.price.toFixed(4) : coin.price.toLocaleString()}
+                        {formatPrice(coin.price)}
                       </p>
                     )}
                   </div>

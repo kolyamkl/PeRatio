@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ArrowUpDown, Plus, X } from 'lucide-react'
 import type { Coin } from '../lib/mockData'
-import { formatCurrency } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'
 import { CoinSelectModal } from './CoinSelectModal'
+import { fetchPrices, formatPrice } from '../lib/priceService'
 
 // Coin icon component
 const CoinIcon = ({ ticker, size = 40 }: { ticker: string; size?: number }) => {
@@ -12,6 +12,8 @@ const CoinIcon = ({ ticker, size = 40 }: { ticker: string; size?: number }) => {
     ETH: 'bg-blue-500',
     SOL: 'bg-gradient-to-br from-purple-500 to-cyan-400',
     AVAX: 'bg-red-500',
+    ARB: 'bg-blue-400',
+    OP: 'bg-red-500',
     DOT: 'bg-pink-500',
     LINK: 'bg-blue-600',
     MATIC: 'bg-purple-600',
@@ -28,11 +30,20 @@ const CoinIcon = ({ ticker, size = 40 }: { ticker: string; size?: number }) => {
     ATOM: 'bg-purple-700',
     UNI: 'bg-pink-600',
     AAVE: 'bg-cyan-600',
-    AAPL: 'bg-gray-300',
-    TSLA: 'bg-red-500',
-    GOOGL: 'bg-blue-500',
-    MSFT: 'bg-green-500',
-    NVDA: 'bg-green-600',
+    SUI: 'bg-blue-500',
+    APT: 'bg-black',
+    SEI: 'bg-red-400',
+    INJ: 'bg-blue-600',
+    TIA: 'bg-purple-500',
+    NEAR: 'bg-black',
+    PEPE: 'bg-green-500',
+    WIF: 'bg-amber-500',
+    BONK: 'bg-orange-500',
+    FLOKI: 'bg-yellow-600',
+    TAO: 'bg-black',
+    WLD: 'bg-black',
+    RNDR: 'bg-red-500',
+    FET: 'bg-purple-500',
   }
 
   const bgColor = colors[ticker] || 'bg-accent-primary/30'
@@ -66,6 +77,25 @@ export function PairCard({
 }: PairCardProps) {
   const [isSwapping, setIsSwapping] = useState(false)
   const [showCoinSelector, setShowCoinSelector] = useState<'long' | 'short' | null>(null)
+  const [livePrices, setLivePrices] = useState<Record<string, number>>({})
+
+  // Fetch real-time prices from Hyperliquid
+  useEffect(() => {
+    const loadPrices = async () => {
+      const prices = await fetchPrices()
+      setLivePrices(prices)
+    }
+    
+    loadPrices()
+    // Refresh prices every 10 seconds
+    const interval = setInterval(loadPrices, 10000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Get live price for a coin
+  const getLivePrice = (ticker: string, fallbackPrice?: number): number => {
+    return livePrices[ticker] ?? fallbackPrice ?? 0
+  }
 
   const handleSwap = () => {
     hapticFeedback('impact', 'medium')
@@ -107,6 +137,7 @@ export function PairCard({
   const renderCoinItem = (coin: Coin, type: 'long' | 'short', index: number, total: number) => {
     const isLong = type === 'long'
     const allocation = Math.round(100 / total)
+    const livePrice = getLivePrice(coin.ticker, coin.price)
     
     return (
       <div 
@@ -135,7 +166,7 @@ export function PairCard({
             </span>
           </div>
           <span className="text-xs text-text-secondary">
-            {coin.price ? formatCurrency(coin.price) : `${type === 'long' ? 'Long' : 'Short'} Position`}
+            {livePrice > 0 ? formatPrice(livePrice) : `${type === 'long' ? 'Long' : 'Short'} Position`}
           </span>
         </div>
         

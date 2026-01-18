@@ -158,7 +158,7 @@ export function TradeConfirmPage() {
   const [longBasket, setLongBasket] = useState<any[]>([])
   const [shortBasket, setShortBasket] = useState<any[]>([])
   const [tradeConfidence, setTradeConfidence] = useState<number | null>(null)
-  const [basketCategory, setBasketCategory] = useState<string | null>(null)
+  const [_basketCategory, setBasketCategory] = useState<string | null>(null)
 
   // Read trade parameters directly from URL (more reliable than API calls due to caching)
   useEffect(() => {

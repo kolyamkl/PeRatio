@@ -1327,12 +1327,16 @@ def build_notification_message(
     )
 
     message = f"{header}\n\n{overview}\n\n{body}\n\nTap below for details."
+    
+    # Link directly to trades page (home) instead of root
+    trades_url = f"{mini_app_url}/trades"
+    
     keyboard = {
         "inline_keyboard": [
             [
                 {
-                    "text": "📱 View Dashboard",
-                    "web_app": {"url": mini_app_url},
+                    "text": "📱 View Trades",
+                    "web_app": {"url": trades_url},
                 }
             ]
         ]

@@ -7,14 +7,15 @@ import {
   Filter,
   Zap,
   BarChart3,
-  Loader2,
   RefreshCw
 } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { SegmentedSwitch } from '../components/SegmentedSwitch'
 import { TradeCard } from '../components/TradeCard'
 import { PerformanceChart } from '../components/PerformanceChart'
-import { formatCurrency, formatPercent, type Trade, availableCoins } from '../lib/mockData'
+import { ShimmerTradeCard } from '../components/Shimmer'
+import { GlowPulse } from '../components/GlowPulse'
+import { formatCurrency, formatPercent, type Trade, availableCoins, mockTrades } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'
 
 // Backend URL - uses env var in production, empty for dev (Vite proxy)
@@ -211,10 +212,18 @@ export function TradesPage() {
     allApiTrades.filter(t => t.status === 'open'), 
     [allApiTrades]
   )
-  const closedTrades = useMemo(() => 
-    allApiTrades.filter(t => t.status === 'closed'),
-    [allApiTrades]
+  
+  // For closed trades, combine API closed trades with mock closed trades for history
+  const mockClosedTrades = useMemo(() => 
+    mockTrades.filter(t => t.status === 'closed'),
+    []
   )
+  
+  const closedTrades = useMemo(() => {
+    const apiClosed = allApiTrades.filter(t => t.status === 'closed')
+    // Combine API closed trades with mock historical trades
+    return [...apiClosed, ...mockClosedTrades]
+  }, [allApiTrades, mockClosedTrades])
   
   const allTrades = activeTab === 'Open' ? openTrades : closedTrades
   
@@ -254,16 +263,28 @@ export function TradesPage() {
     fetchTrades()
   }
   
-  // Loading state
+  // Loading state - shimmer skeleton
   if (loading) {
     return (
       <div className="flex flex-col min-h-screen bg-bg-primary">
         <TopBar title="My Trades" showBackButton />
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="w-10 h-10 text-accent-primary animate-spin mx-auto mb-4" />
-            <p className="text-text-secondary">Loading trades from database...</p>
+        <div className="px-4 py-6 space-y-4">
+          {/* Shimmer tabs */}
+          <div className="flex gap-2 mb-4">
+            <div className="h-10 w-24 bg-bg-secondary rounded-xl overflow-hidden relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-shimmer" />
+            </div>
+            <div className="h-10 w-24 bg-bg-secondary rounded-xl overflow-hidden relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-shimmer" style={{ animationDelay: '0.2s' }} />
+            </div>
           </div>
+          
+          {/* Shimmer trade cards */}
+          <ShimmerTradeCard />
+          <ShimmerTradeCard className="opacity-80" />
+          <ShimmerTradeCard className="opacity-60" />
+          
+          <p className="text-center text-text-secondary text-sm mt-4">Loading trades...</p>
         </div>
       </div>
     )
@@ -424,11 +445,11 @@ export function TradesPage() {
         </div>
       </div>
       
-      {/* Performance Chart Modal - uses all trades from API */}
+      {/* Performance Chart Modal - uses all trades including mock closed for history */}
       <PerformanceChart 
         isOpen={showChart}
         onClose={() => setShowChart(false)}
-        trades={allApiTrades}
+        trades={[...allApiTrades, ...mockClosedTrades]}
       />
       
       {/* Trades list */}
@@ -436,7 +457,18 @@ export function TradesPage() {
         {trades.length > 0 ? (
           <div className="space-y-3" key={activeTab}>
             {trades.map((trade, index) => (
-              <TradeCard key={trade.id} trade={trade} index={index} />
+              trade.status === 'open' ? (
+                <GlowPulse 
+                  key={trade.id} 
+                  isActive={true} 
+                  color={trade.pnlPct >= 0 ? 'green' : 'red'}
+                  intensity="low"
+                >
+                  <TradeCard trade={trade} index={index} />
+                </GlowPulse>
+              ) : (
+                <TradeCard key={trade.id} trade={trade} index={index} />
+              )
             ))}
           </div>
         ) : searchQuery ? (
