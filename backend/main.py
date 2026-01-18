@@ -22,8 +22,8 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 from config import get_settings
 
-# Add LLLM path for SignalGenerator import
-_lllm_path = os.path.join(os.path.dirname(__file__), "LLM_PEAR", "LLM", "LLLM")
+# Add lllm path for SignalGenerator import
+_lllm_path = os.path.join(os.path.dirname(__file__), "lllm")
 if _lllm_path not in sys.path:
     sys.path.insert(0, _lllm_path)
     

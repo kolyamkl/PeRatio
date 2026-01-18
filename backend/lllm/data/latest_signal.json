@@ -1,0 +1,46 @@
+{
+  "trade_type": "PAIR",
+  "basket_category": "MOMENTUM",
+  "long_basket": [
+    {
+      "coin": "DOGE",
+      "weight": 1.0
+    }
+  ],
+  "short_basket": [
+    {
+      "coin": "ARB",
+      "weight": 1.0
+    }
+  ],
+  "pair_ratio": {
+    "entry_ratio": 0.63,
+    "target_ratio": 0.5,
+    "stop_ratio": 0.7,
+    "ratio_explanation": "DOGE / ARB"
+  },
+  "confidence": 8,
+  "thesis": "DOGE has shown positive momentum while ARB is underperforming, presenting a strong momentum divergence opportunity.",
+  "position_sizing": {
+    "recommended_sl_percent": 10,
+    "recommended_tp_percent": 20,
+    "risk_reward_ratio": 2.0
+  },
+  "factor_analysis": {
+    "momentum_divergence": 8,
+    "layer_rotation_signal": 3,
+    "volatility_match": 5,
+    "correlation_quality": 6,
+    "funding_favorability": 4,
+    "overall_confluence": 7
+  },
+  "execution_recommendation": "MARKET",
+  "weighting_method": "equal",
+  "generated_at": "2026-01-18T07:57:38.770910",
+  "model": "gpt-4o-mini",
+  "validation": {
+    "is_valid": true,
+    "errors": []
+  },
+  "meets_threshold": true
+}

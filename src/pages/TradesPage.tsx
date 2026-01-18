@@ -9,12 +9,12 @@ import {
   BarChart3,
   RefreshCw
 } from 'lucide-react'
-import { TopBar } from '../components/TopBar'
-import { SegmentedSwitch } from '../components/SegmentedSwitch'
-import { TradeCard } from '../components/TradeCard'
-import { PerformanceChart } from '../components/PerformanceChart'
-import { ShimmerTradeCard } from '../components/Shimmer'
-import { GlowPulse } from '../components/GlowPulse'
+import { TopBar } from '../components/layout/TopBar'
+import { SegmentedSwitch } from '../components/ui/SegmentedSwitch'
+import { TradeCard } from '../components/trade/TradeCard'
+import { PerformanceChart } from '../components/trade/PerformanceChart'
+import { ShimmerTradeCard } from '../components/ui/Shimmer'
+import { GlowPulse } from '../components/ui/GlowPulse'
 import { formatCurrency, formatPercent, type Trade, availableCoins, mockTrades } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'
 
