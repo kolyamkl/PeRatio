@@ -1,16 +1,9 @@
-import { createContext, useContext, ReactNode } from 'react'
+import { createContext, useContext, ReactNode, useEffect, useState } from 'react'
 
-// ============================================================================
-// WALLET STUB - Backend handles all wallet operations
-// ============================================================================
-// 
-// This is a minimal stub. The backend uses PEAR_PRIVATE_KEY + PEAR_USER_WALLET
-// to execute trades via Pear Protocol. No frontend wallet connection needed.
-//
-// The WalletProvider is kept for backward compatibility but does nothing.
-// ============================================================================
+export type WalletType = 'metamask' | 'walletconnect' | 'coinbase' | 'phantom'
 
-export type WalletType = 'metamask' | 'walletconnect' | 'coinbase' | 'phantom' | 'tonconnect'
+// Wallet address for this session
+const WALLET_ADDRESS = '0x76F9398Ee268b9fdc06C0dff402B20532922fFAE'
 
 export interface WalletState {
   isConnected: boolean
@@ -18,6 +11,7 @@ export interface WalletState {
   address: string | null
   walletType: WalletType | null
   balance: number
+  balanceLoading: boolean
   currency: string
   displayAddress: string | null
   chainId: number | null
@@ -28,6 +22,7 @@ interface WalletContextType extends WalletState {
   connect: (walletType: WalletType) => Promise<boolean>
   disconnect: () => Promise<void>
   refreshBalance: () => Promise<void>
+  openModal: () => void
 }
 
 const defaultState: WalletState = {
@@ -36,7 +31,8 @@ const defaultState: WalletState = {
   address: null,
   walletType: null,
   balance: 0,
-  currency: 'ETH',
+  balanceLoading: true,
+  currency: 'USDC',
   displayAddress: null,
   chainId: null,
   error: null,
@@ -49,28 +45,91 @@ interface WalletProviderProps {
 }
 
 /**
- * WalletProvider - Minimal stub provider
- * 
- * The actual trading wallet is configured on the backend via:
- * - PEAR_PRIVATE_KEY
- * - PEAR_USER_WALLET
- * 
- * This stub exists for backward compatibility only.
+ * Fetch USDC balance from Arbitrum blockchain
+ */
+async function fetchUSDCBalance(address: string): Promise<number> {
+  try {
+    // Arbitrum USDC contract
+    const usdcContract = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+    // balanceOf(address) function selector
+    const callData = '0x70a08231000000000000000000000000' + address.slice(2).toLowerCase()
+    
+    const response = await fetch('https://arb1.arbitrum.io/rpc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_call',
+        params: [{ to: usdcContract, data: callData }, 'latest'],
+        id: 1
+      })
+    })
+    
+    const data = await response.json()
+    const balanceRaw = BigInt(data.result || '0')
+    return Number(balanceRaw) / 1e6 // USDC has 6 decimals
+  } catch (err) {
+    console.error('[Wallet] Error fetching USDC balance:', err)
+    return 0
+  }
+}
+
+/**
+ * WalletProvider - Auto-connects with wallet on mount and fetches real balance
  */
 export function WalletProvider({ children }: WalletProviderProps) {
-  console.log('[Wallet] 📝 WalletProvider loaded (stub - backend handles wallet)')
-  
-  const contextValue: WalletContextType = {
+  const [state, setState] = useState<WalletState>({
     ...defaultState,
-    connect: async () => {
-      console.log('[Wallet] ⚠️ connect() called - backend wallet is used, no frontend connection needed')
-      return false
+    isConnected: true,
+    address: WALLET_ADDRESS,
+    walletType: 'metamask',
+    displayAddress: `${WALLET_ADDRESS.slice(0, 6)}...${WALLET_ADDRESS.slice(-4)}`,
+    chainId: 42161, // Arbitrum mainnet
+  })
+
+  // Fetch real balance on mount
+  useEffect(() => {
+    const loadBalance = async () => {
+      console.log('[Wallet] 🔗 Connecting wallet:', WALLET_ADDRESS)
+      console.log('[Wallet] 💰 Fetching USDC balance from Arbitrum...')
+      
+      const balance = await fetchUSDCBalance(WALLET_ADDRESS)
+      
+      console.log('[Wallet] ✅ USDC Balance:', balance.toFixed(2))
+      
+      setState(prev => ({
+        ...prev,
+        balance,
+        balanceLoading: false,
+      }))
+    }
+    
+    loadBalance()
+    
+    // Refresh balance every 30 seconds
+    const interval = setInterval(loadBalance, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const refreshBalance = async () => {
+    console.log('[Wallet] 🔄 Refreshing balance...')
+    setState(prev => ({ ...prev, balanceLoading: true }))
+    const balance = await fetchUSDCBalance(WALLET_ADDRESS)
+    setState(prev => ({ ...prev, balance, balanceLoading: false }))
+  }
+
+  const contextValue: WalletContextType = {
+    ...state,
+    connect: async (_walletType: WalletType) => {
+      console.log('[Wallet] ℹ️ Wallet already connected')
+      return true
     },
     disconnect: async () => {
-      console.log('[Wallet] ⚠️ disconnect() called - backend wallet is used')
+      console.log('[Wallet] ℹ️ Disconnect disabled for this session')
     },
-    refreshBalance: async () => {
-      console.log('[Wallet] ⚠️ refreshBalance() called - backend wallet is used')
+    refreshBalance,
+    openModal: () => {
+      console.log('[Wallet] ℹ️ Modal disabled - using fixed wallet')
     },
   }
 
@@ -82,7 +141,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
 }
 
 /**
- * useWallet hook - Returns stub wallet state
+ * useWallet hook - Returns wallet state
  */
 export function useWallet(): WalletContextType {
   const context = useContext(WalletContext)

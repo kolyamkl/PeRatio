@@ -5,6 +5,11 @@ import { useToast } from './Toast'
 
 type ConfirmState = 'idle' | 'submitting' | 'confirmed'
 
+interface BasketAsset {
+  coin: string
+  weight: number
+}
+
 interface TradeData {
   pair: {
     long: { symbol: string; notional: number; leverage: number }
@@ -12,6 +17,8 @@ interface TradeData {
   }
   takeProfitRatio: number
   stopLossRatio: number
+  longBasket?: BasketAsset[]
+  shortBasket?: BasketAsset[]
 }
 
 interface StickyConfirmProps {
@@ -43,57 +50,117 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyCo
       setTimeout(() => setRipple(null), 600)
     }
     
-    // Trigger haptic feedback
-    hapticFeedback('impact', 'medium')
+    // Trigger haptic feedback safely
+    try {
+      hapticFeedback('impact', 'medium')
+    } catch (e) {
+      console.log('[StickyConfirm] Haptic feedback not available')
+    }
     
     setState('submitting')
+    
+    console.log('========================================')
+    console.log('[StickyConfirm] 🚀 CONFIRM BUTTON CLICKED')
+    console.log('========================================')
+    console.log('[StickyConfirm] State:', { tradeId, hasTradeData: !!tradeData, disabled })
+    console.log('[StickyConfirm] Full tradeData:', JSON.stringify(tradeData, null, 2))
     
     try {
       if (tradeId && tradeData) {
         // Call real execute API
         const apiUrl = `${backendUrl}/api/trades/${tradeId}/execute`
-        console.log('[StickyConfirm] 🚀 Executing trade:', tradeId)
-        console.log('[StickyConfirm] API URL:', apiUrl)
-        console.log('[StickyConfirm] Trade data:', JSON.stringify(tradeData, null, 2))
+        
+        const requestBody = {
+          pair: tradeData.pair,
+          takeProfitRatio: tradeData.takeProfitRatio,
+          stopLossRatio: tradeData.stopLossRatio,
+          longBasket: tradeData.longBasket || [],
+          shortBasket: tradeData.shortBasket || [],
+        }
+        
+        console.log('[StickyConfirm] 📤 REQUEST DETAILS:')
+        console.log('[StickyConfirm]   URL:', apiUrl)
+        console.log('[StickyConfirm]   Method: POST')
+        console.log('[StickyConfirm]   Body:', JSON.stringify(requestBody, null, 2))
         
         const res = await fetch(apiUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pair: tradeData.pair,
-            takeProfitRatio: tradeData.takeProfitRatio,
-            stopLossRatio: tradeData.stopLossRatio,
-          }),
+          headers: { 
+            'Content-Type': 'application/json',
+            'bypass-tunnel-reminder': 'true',  // Required for localtunnel
+          },
+          body: JSON.stringify(requestBody),
         })
         
-        console.log('[StickyConfirm] Response status:', res.status)
+        console.log('[StickyConfirm] 📥 RESPONSE:')
+        console.log('[StickyConfirm]   Status:', res.status, res.statusText)
+        console.log('[StickyConfirm]   OK:', res.ok)
+        console.log('[StickyConfirm]   Headers:', Object.fromEntries(res.headers.entries()))
+        
+        // Get response text first for debugging
+        const responseText = await res.text()
+        console.log('[StickyConfirm]   Body (raw):', responseText.substring(0, 500))
         
         if (!res.ok) {
-          const error = await res.json()
-          console.error('[StickyConfirm] ❌ Error response:', error)
-          throw new Error(error.detail || 'Trade execution failed')
+          let errorMessage = 'Trade execution failed'
+          try {
+            // Check if response looks like HTML/TypeScript (error page from tunnel/proxy)
+            const trimmedResponse = responseText.trim()
+            if (trimmedResponse.startsWith('<!DOCTYPE') || 
+                trimmedResponse.startsWith('<html') || 
+                trimmedResponse.startsWith('import ') ||
+                trimmedResponse.includes('</html>')) {
+              console.error('[StickyConfirm] ❌ Got HTML/code response instead of JSON - tunnel/proxy error')
+              errorMessage = `Server unavailable (status ${res.status}). Please try again.`
+            } else {
+              const error = JSON.parse(responseText)
+              console.error('[StickyConfirm] ❌ Error response parsed:', error)
+              errorMessage = error.detail || error.message || error.error || errorMessage
+            }
+          } catch (parseErr) {
+            console.error('[StickyConfirm] ❌ Could not parse error response:', parseErr)
+            // Don't show raw HTML/code to user
+            if (responseText.length > 200 || responseText.includes('<') || responseText.includes('import ')) {
+              errorMessage = `Server error (status ${res.status}). Please try again.`
+            } else {
+              errorMessage = responseText || errorMessage
+            }
+          }
+          throw new Error(errorMessage)
         }
         
-        const result = await res.json()
-        console.log('[StickyConfirm] ✅ Trade executed:', result)
+        const result = JSON.parse(responseText)
+        console.log('[StickyConfirm] ✅ Trade executed successfully!')
+        console.log('[StickyConfirm]   Result:', result)
         
         setState('confirmed')
-        hapticFeedback('notification', 'success')
+        try { hapticFeedback('notification', 'success') } catch {}
         showToast('Trade executed via Pear Protocol!', 'success')
       } else {
         // Demo mode - no tradeId
-        console.log('[StickyConfirm] ⚠️ Demo mode - simulating trade (no tradeId)')
+        console.log('[StickyConfirm] ⚠️ Demo mode - simulating trade')
+        console.log('[StickyConfirm]   tradeId:', tradeId)
+        console.log('[StickyConfirm]   tradeData:', tradeData)
         await new Promise(resolve => setTimeout(resolve, 1500))
         setState('confirmed')
-        hapticFeedback('notification', 'success')
+        try { hapticFeedback('notification', 'success') } catch {}
         showToast('Trade submitted (demo)', 'success')
       }
     } catch (err: unknown) {
       const error = err as Error
-      console.error('[StickyConfirm] Error:', error)
+      console.error('[StickyConfirm] ❌ EXECUTION FAILED')
+      console.error('[StickyConfirm]   Error type:', error.constructor.name)
+      console.error('[StickyConfirm]   Error message:', error.message)
+      console.error('[StickyConfirm]   Error stack:', error.stack)
       setState('idle')
-      hapticFeedback('notification', 'error')
-      showToast(error.message || 'Trade failed', 'error')
+      try { hapticFeedback('notification', 'error') } catch {}
+      
+      // Sanitize error message - don't show raw HTML/code to user
+      let displayMessage = error.message || 'Trade failed'
+      if (displayMessage.length > 100 || displayMessage.includes('<') || displayMessage.includes('import ')) {
+        displayMessage = 'Trade execution failed. Please try again.'
+      }
+      showToast(displayMessage, 'error')
     }
   }
   

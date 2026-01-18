@@ -102,7 +102,9 @@ export function TradesPage() {
     console.log('[TradesPage] Backend URL:', backendUrl || '(using proxy)')
     
     try {
-      const res = await fetch(`${backendUrl}/api/trades?limit=100`)
+      const res = await fetch(`${backendUrl}/api/trades?limit=100`, {
+        headers: { 'bypass-tunnel-reminder': 'true' }
+      })
       console.log('[TradesPage] Response status:', res.status)
       
       if (!res.ok) {

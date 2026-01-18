@@ -46,10 +46,17 @@ class GenerateTradeResponse(TradeSchema):
     pass
 
 
+class BasketAsset(BaseModel):
+    coin: str
+    weight: float
+
+
 class ExecuteTradeRequest(BaseModel):
     pair: dict
     takeProfitRatio: float
     stopLossRatio: float
+    longBasket: list[BasketAsset] = []
+    shortBasket: list[BasketAsset] = []
 
     @validator("takeProfitRatio", "stopLossRatio")
     def ratios_reasonable(cls, v: float) -> float:

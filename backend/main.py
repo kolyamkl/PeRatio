@@ -606,14 +606,14 @@ Return ONLY valid JSON."""
         )
     
     # Calculate notionals for baskets
-    # Base notional per side (total ~$400)
-    BASE_NOTIONAL_PER_SIDE = 200.0
+    # Simple $10 per side for testing
+    BASE_NOTIONAL_PER_SIDE = 10.0
     
     # Add notional to each basket asset based on weight
     for asset in long_basket:
-        asset["notional"] = round(BASE_NOTIONAL_PER_SIDE * asset.get("weight", 0.5), 2)
+        asset["notional"] = round(BASE_NOTIONAL_PER_SIDE * asset.get("weight", 1.0), 2)
     for asset in short_basket:
-        asset["notional"] = round(BASE_NOTIONAL_PER_SIDE * asset.get("weight", 0.5), 2)
+        asset["notional"] = round(BASE_NOTIONAL_PER_SIDE * asset.get("weight", 1.0), 2)
     
     logger.info(f"")
     logger.info(f"[LLM] 💵 NOTIONAL ALLOCATION:")
@@ -623,10 +623,9 @@ Return ONLY valid JSON."""
     for asset in short_basket:
         logger.info(f"[LLM]   SHORT {asset['coin']}: ${asset['notional']}")
     
-    # Extract position sizing
-    pos_sizing = signal_data.get("position_sizing", {})
-    sl_pct = pos_sizing.get("recommended_sl_percent", 5.0)
-    tp_pct = pos_sizing.get("recommended_tp_percent", 15.0)
+    # Fixed position sizing: 10% SL, 20% TP
+    sl_pct = 10.0  # Fixed 10% stop loss
+    tp_pct = 20.0  # Fixed 20% take profit
     
     # Use primary asset from each basket for the main pair
     # (For compatibility with existing Trade model)
@@ -637,7 +636,7 @@ Return ONLY valid JSON."""
     short_symbol = f"{primary_short['coin']}-PERP"
     long_notional = sum(a["notional"] for a in long_basket)
     short_notional = sum(a["notional"] for a in short_basket)
-    leverage = 2  # From LLLM config MAX_LEVERAGE
+    leverage = 2  # Conservative leverage for stability
     take_profit_ratio = tp_pct / 100
     stop_loss_ratio = -sl_pct / 100
     reasoning = signal_data.get("thesis", "AI-generated basket pair trade")
@@ -843,6 +842,7 @@ def execute_trade(
     trade.stop_loss_ratio = payload.stopLossRatio
     
     logger.info(f"[EXECUTE] Updated params: LONG {trade.pair_long_symbol} ${trade.pair_long_notional} {trade.pair_long_leverage}x | SHORT {trade.pair_short_symbol} ${trade.pair_short_notional} {trade.pair_short_leverage}x")
+    logger.info(f"[EXECUTE] TP/SL from user: takeProfitRatio={payload.takeProfitRatio} ({payload.takeProfitRatio * 100 if payload.takeProfitRatio else 0}%), stopLossRatio={payload.stopLossRatio} ({abs(payload.stopLossRatio * 100) if payload.stopLossRatio else 0}%)")
 
     # Execute via Pear Protocol API
     if settings.pear_access_token and settings.pear_api_url:
@@ -851,28 +851,91 @@ def execute_trade(
             logger.info(f"[PEAR] API URL: {settings.pear_api_url}")
             logger.info(f"[PEAR] User wallet: {settings.pear_user_wallet}")
             
-            # Extract asset names (remove -PERP suffix)
-            long_asset = trade.pair_long_symbol.replace("-PERP", "")
-            short_asset = trade.pair_short_symbol.replace("-PERP", "")
+            # Get baskets from request (sent from mini app) - these are the actual assets user sees
+            request_long_basket = payload.longBasket if payload.longBasket else []
+            request_short_basket = payload.shortBasket if payload.shortBasket else []
+            
+            logger.info(f"[PEAR] Long basket from request: {[{'coin': a.coin, 'weight': a.weight} for a in request_long_basket]}")
+            logger.info(f"[PEAR] Short basket from request: {[{'coin': a.coin, 'weight': a.weight} for a in request_short_basket]}")
+            
+            # Use primary asset from each basket (single asset per side for reliability)
+            # The Pear API works best with single assets per side
+            long_asset = None
+            short_asset = None
+            
+            # Get primary long asset (highest weight or first)
+            if request_long_basket and len(request_long_basket) > 0:
+                # Sort by weight descending and take first
+                sorted_long = sorted(request_long_basket, key=lambda x: x.weight, reverse=True)
+                long_asset = sorted_long[0].coin.replace('-PERP', '')
+                logger.info(f"[PEAR]   📈 Long (primary): {long_asset}")
+                for a in request_long_basket:
+                    logger.info(f"[PEAR]     - {a.coin}: {a.weight * 100:.1f}%")
+            
+            if not long_asset:
+                long_asset = trade.pair_long_symbol.replace("-PERP", "")
+                logger.info(f"[PEAR]   📈 Long (fallback): {long_asset}")
+            
+            # Get primary short asset (highest weight or first)
+            if request_short_basket and len(request_short_basket) > 0:
+                sorted_short = sorted(request_short_basket, key=lambda x: x.weight, reverse=True)
+                short_asset = sorted_short[0].coin.replace('-PERP', '')
+                logger.info(f"[PEAR]   📉 Short (primary): {short_asset}")
+                for a in request_short_basket:
+                    logger.info(f"[PEAR]     - {a.coin}: {a.weight * 100:.1f}%")
+            
+            if not short_asset:
+                short_asset = trade.pair_short_symbol.replace("-PERP", "")
+                logger.info(f"[PEAR]   📉 Short (fallback): {short_asset}")
+            
+            # Use single asset per side (most reliable with Pear API)
+            long_assets = [{"asset": long_asset, "weight": 1.0}]
+            short_assets = [{"asset": short_asset, "weight": 1.0}]
+            
+            logger.info(f"[PEAR] 📊 FINAL PAIR: {long_asset} (LONG) vs {short_asset} (SHORT)")
+            
             total_notional = trade.pair_long_notional + trade.pair_short_notional
             
-            # Build position request - pair trade (long + short)
+            # Cap total notional to max $10
+            if total_notional > 10:
+                logger.warning(f"[PEAR] ⚠️ Total notional ${total_notional} exceeds $10 cap, adjusting...")
+                total_notional = 10.0
+            
+            # Build position request - supports multi-asset baskets with TP/SL
             position_data = {
                 "executionType": "MARKET",
-                "slippage": 0.08,  # 8%
+                "slippage": 0.08,  # 8% slippage tolerance
                 "leverage": trade.pair_long_leverage,
                 "usdValue": total_notional,
-                "longAssets": [{"asset": long_asset, "weight": trade.pair_long_notional / total_notional}],
-                "shortAssets": [{"asset": short_asset, "weight": trade.pair_short_notional / total_notional}],
+                "longAssets": long_assets,
+                "shortAssets": short_assets,
             }
             
-            logger.info(f"[PEAR] Request payload: {json.dumps(position_data, indent=2)}")
+            # Add TP/SL if provided (must be objects with type and value)
+            if trade.take_profit_ratio:
+                position_data["takeProfit"] = {
+                    "type": "PERCENTAGE",
+                    "value": abs(trade.take_profit_ratio * 100)
+                }
+            if trade.stop_loss_ratio:
+                position_data["stopLoss"] = {
+                    "type": "PERCENTAGE",
+                    "value": abs(trade.stop_loss_ratio * 100)
+                }
             
-            headers = {
-                'Authorization': f'Bearer {settings.pear_access_token[:20]}...',
-                'Content-Type': 'application/json'
-            }
-            logger.info(f"[PEAR] Headers: Authorization=Bearer ***..., Content-Type=application/json")
+            # Log TP/SL values
+            if trade.take_profit_ratio:
+                logger.info(f"[PEAR]   takeProfit: {abs(trade.take_profit_ratio * 100):.1f}% (PERCENTAGE type)")
+            if trade.stop_loss_ratio:
+                logger.info(f"[PEAR]   stopLoss: {abs(trade.stop_loss_ratio * 100):.1f}% (PERCENTAGE type)")
+            
+            logger.info(f"[PEAR] 📦 Position request:")
+            logger.info(f"[PEAR]   executionType: MARKET")
+            logger.info(f"[PEAR]   leverage: {trade.pair_long_leverage}x")
+            logger.info(f"[PEAR]   usdValue: ${total_notional}")
+            logger.info(f"[PEAR]   longAssets: {len(long_assets)} asset(s)")
+            logger.info(f"[PEAR]   shortAssets: {len(short_assets)} asset(s)")
+            logger.info(f"[PEAR] Full payload: {json.dumps(position_data, indent=2)}")
             
             response = requests.post(
                 f'{settings.pear_api_url}/positions',
@@ -885,7 +948,7 @@ def execute_trade(
             )
             
             logger.info(f"[PEAR] Response status: {response.status_code}")
-            logger.info(f"[PEAR] Response body: {response.text[:500]}")
+            logger.info(f"[PEAR] Response body: {response.text[:1000]}")
             
             if response.status_code in [200, 201]:
                 result = response.json()
@@ -900,9 +963,11 @@ def execute_trade(
                 # Parse error message for user-friendly display
                 try:
                     error_json = response.json()
-                    user_error = error_json.get('message', error_json.get('error', 'Trade execution failed'))
-                except:
-                    user_error = "Trade execution failed. Please try again."
+                    user_error = error_json.get('message', error_json.get('error', error_json.get('detail', 'Trade execution failed')))
+                    logger.error(f"[PEAR] Parsed error detail: {user_error}")
+                except Exception as parse_err:
+                    logger.error(f"[PEAR] Failed to parse error JSON: {parse_err}")
+                    user_error = "Trade execution failed. Please check your balance and try again."
                 
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
@@ -925,6 +990,7 @@ def execute_trade(
             raise
         except Exception as e:
             logger.error(f"[PEAR] ❌ Unexpected error: {e}")
+            logger.exception(e)  # Log full stack trace
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Trade execution failed: {str(e)}"

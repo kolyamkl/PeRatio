@@ -97,14 +97,24 @@ function ToastItem({ toast, onDismiss }: ToastItemProps) {
   
   const Icon = icons[toast.type]
   
+  // Truncate very long messages and sanitize any HTML/code content
+  let displayMessage = toast.message
+  if (displayMessage.length > 150) {
+    displayMessage = displayMessage.substring(0, 147) + '...'
+  }
+  // Don't display raw HTML or code
+  if (displayMessage.includes('<html') || displayMessage.includes('<!DOCTYPE') || displayMessage.includes('import ')) {
+    displayMessage = 'An error occurred. Please try again.'
+  }
+  
   return (
     <div 
       className={`flex items-center gap-3 px-4 py-3 rounded-xl border animate-fade-up ${bgColors[toast.type]}`}
       style={{ backdropFilter: 'blur(12px)' }}
     >
       <Icon className={`w-5 h-5 flex-shrink-0 ${colors[toast.type]}`} />
-      <p className="flex-1 text-sm font-medium text-text-primary">
-        {toast.message}
+      <p className="flex-1 text-sm font-medium text-text-primary line-clamp-2">
+        {displayMessage}
       </p>
       <button
         onClick={() => onDismiss(toast.id)}

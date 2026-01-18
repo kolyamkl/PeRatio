@@ -16,52 +16,110 @@ type FrequencyOption = 'never' | '1m' | '5m' | '15m' | '1h' | '2h' | '4h' | 'dai
 export function TradeConfirmPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   
-  // Backend trading wallet state (no user wallet needed)
+  // Wallet address for this demo
+  const WALLET_ADDRESS = '0x76F9398Ee268b9fdc06C0dff402B20532922fFAE'
+  
+  // Backend trading wallet state
   const [backendWallet, setBackendWallet] = useState<{
     walletAddress: string
     displayAddress: string
     hasCredentials: boolean
     status: string
     network: string
-  } | null>(null)
-  const [walletLoading, setWalletLoading] = useState(true)
+    balance: number
+    balanceLoading: boolean
+  } | null>({
+    walletAddress: WALLET_ADDRESS,
+    displayAddress: `${WALLET_ADDRESS.slice(0, 6)}...${WALLET_ADDRESS.slice(-4)}`,
+    hasCredentials: true,
+    status: 'connected',
+    network: 'Arbitrum Mainnet',
+    balance: 0,
+    balanceLoading: true
+  })
+  const [walletLoading, _setWalletLoading] = useState(false)
   
   // Backend URL - uses env var in production (ngrok), empty for dev (Vite proxy)
   const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
   
-  // Log backend URL on mount for debugging
+  // Fetch real wallet balance from Arbitrum
+  useEffect(() => {
+    const fetchWalletBalance = async () => {
+      console.log('[TradeConfirm] 💰 Fetching real wallet balance for:', WALLET_ADDRESS)
+      
+      try {
+        // Use Arbitrum public RPC to get ETH balance
+        const ethBalanceResponse = await fetch('https://arb1.arbitrum.io/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'eth_getBalance',
+            params: [WALLET_ADDRESS, 'latest'],
+            id: 1
+          })
+        })
+        
+        const ethData = await ethBalanceResponse.json()
+        const ethBalanceWei = BigInt(ethData.result || '0')
+        const ethBalance = Number(ethBalanceWei) / 1e18
+        
+        // Fetch USDC balance (Arbitrum USDC contract: 0xaf88d065e77c8cC2239327C5EDb3A432268e5831)
+        const usdcContract = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
+        // balanceOf(address) function selector: 0x70a08231
+        const usdcCallData = '0x70a08231000000000000000000000000' + WALLET_ADDRESS.slice(2).toLowerCase()
+        
+        const usdcBalanceResponse = await fetch('https://arb1.arbitrum.io/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'eth_call',
+            params: [{
+              to: usdcContract,
+              data: usdcCallData
+            }, 'latest'],
+            id: 2
+          })
+        })
+        
+        const usdcData = await usdcBalanceResponse.json()
+        const usdcBalanceRaw = BigInt(usdcData.result || '0')
+        const usdcBalance = Number(usdcBalanceRaw) / 1e6 // USDC has 6 decimals
+        
+        console.log('[TradeConfirm] ✅ ETH Balance:', ethBalance.toFixed(6), 'ETH')
+        console.log('[TradeConfirm] ✅ USDC Balance:', usdcBalance.toFixed(2), 'USDC')
+        
+        // Update wallet state with real balance
+        setBackendWallet(prev => prev ? {
+          ...prev,
+          balance: usdcBalance,
+          balanceLoading: false
+        } : null)
+        
+      } catch (err) {
+        console.error('[TradeConfirm] ❌ Error fetching balance:', err)
+        setBackendWallet(prev => prev ? {
+          ...prev,
+          balance: 0,
+          balanceLoading: false
+        } : null)
+      }
+    }
+    
+    fetchWalletBalance()
+    
+    // Refresh balance every 30 seconds
+    const interval = setInterval(fetchWalletBalance, 30000)
+    return () => clearInterval(interval)
+  }, [])
+  
+  // Log on mount for debugging
   useEffect(() => {
     console.log('[TradeConfirm] 🚀 Component mounted')
     console.log('[TradeConfirm] Backend URL:', backendUrl || '(using proxy)')
     console.log('[TradeConfirm] Mode:', import.meta.env.MODE)
-  }, [backendUrl])
-
-  // Fetch backend trading wallet info
-  useEffect(() => {
-    const fetchWalletInfo = async () => {
-      console.log('[TradeConfirm] 💰 Fetching backend wallet info...')
-      setWalletLoading(true)
-      try {
-        const res = await fetch(`${backendUrl}/api/wallet/info`)
-        console.log('[TradeConfirm] Wallet API response status:', res.status)
-        
-        if (res.ok) {
-          const data = await res.json()
-          console.log('[TradeConfirm] ✅ Backend wallet info:', data)
-          setBackendWallet(data)
-        } else {
-          console.error('[TradeConfirm] ❌ Failed to fetch wallet info:', res.status)
-          setBackendWallet(null)
-        }
-      } catch (err) {
-        console.error('[TradeConfirm] ❌ Error fetching wallet info:', err)
-        setBackendWallet(null)
-      } finally {
-        setWalletLoading(false)
-      }
-    }
-    
-    fetchWalletInfo()
+    console.log('[TradeConfirm] 🔗 Wallet connected:', WALLET_ADDRESS)
   }, [backendUrl])
 
   // Settings state
@@ -208,7 +266,9 @@ export function TradeConfirmPage() {
 
     const loadSettings = async () => {
       try {
-        const res = await fetch(`${backendUrl}/api/settings/notification/${userId}`)
+        const res = await fetch(`${backendUrl}/api/settings/notification/${userId}`, {
+          headers: { 'bypass-tunnel-reminder': 'true' }
+        })
         if (res.ok) {
           const data = await res.json()
           setFrequency(data.frequency || 'never')
@@ -254,7 +314,10 @@ export function TradeConfirmPage() {
       console.log('[Settings] Saving to:', `${backendUrl}/api/settings/notification`)
       const res = await fetch(`${backendUrl}/api/settings/notification`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'bypass-tunnel-reminder': 'true'
+        },
         body: JSON.stringify({
           userId,
           chatId: chatId || userId,
@@ -395,11 +458,24 @@ export function TradeConfirmPage() {
                     <span className="px-2 py-0.5 text-xs font-medium bg-green-500/20 text-green-500 rounded-full">Connected</span>
                   </div>
                   <p className="text-sm text-text-muted font-mono">{backendWallet.displayAddress}</p>
-                  <p className="text-xs text-text-muted mt-1">{backendWallet.network}</p>
+                  <div className="flex items-center gap-3 mt-1">
+                    <p className="text-xs text-text-muted">{backendWallet.network}</p>
+                    <span className="text-xs text-text-muted">•</span>
+                    {backendWallet.balanceLoading ? (
+                      <p className="text-xs text-text-muted animate-pulse">Loading balance...</p>
+                    ) : (
+                      <p className="text-xs font-semibold text-green-400">
+                        {backendWallet.balance > 0 
+                          ? `$${backendWallet.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`
+                          : '0 USDC'
+                        }
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
               <a 
-                href={`https://hyperliquid.xyz/address/${backendWallet.walletAddress}`}
+                href={`https://arbiscan.io/address/${backendWallet.walletAddress}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="p-2 rounded-lg bg-bg-tertiary hover:bg-bg-secondary transition-colors"
@@ -504,17 +580,23 @@ export function TradeConfirmPage() {
           pair: {
             long: { 
               symbol: `${longCoins[0]?.ticker || 'BTC'}-PERP`, 
-              notional: 200 * (longPct / 100), 
+              notional: 10.0,  // Fixed $10 per side
               leverage 
             },
             short: { 
               symbol: `${shortCoins[0]?.ticker || 'ETH'}-PERP`, 
-              notional: 200 * (shortPct / 100), 
+              notional: 10.0,  // Fixed $10 per side
               leverage 
             },
           },
           takeProfitRatio: takeProfit / 100,
           stopLossRatio: -stopLoss / 100,
+          longBasket: longBasket.length > 0 
+            ? longBasket.map(a => ({ coin: a.coin, weight: a.weight }))
+            : [{ coin: longCoins[0]?.ticker || 'BTC', weight: 1.0 }],
+          shortBasket: shortBasket.length > 0
+            ? shortBasket.map(a => ({ coin: a.coin, weight: a.weight }))
+            : [{ coin: shortCoins[0]?.ticker || 'ETH', weight: 1.0 }],
         } : undefined}
       />
 
