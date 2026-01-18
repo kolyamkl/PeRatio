@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { AlertTriangle, Minus, Plus } from 'lucide-react'
 import { formatLeverage } from '../lib/mockData'
 import { hapticFeedback } from '../lib/telegram'
@@ -13,23 +13,45 @@ interface ParamsCardProps {
     takeProfitPct: number
   }
   leverage: number
+  betAmount?: number
   onProportionChange?: (longPct: number) => void
   onRiskChange?: (stopLoss: number, takeProfit: number) => void
   onLeverageChange?: (leverage: number) => void
+  onBetAmountChange?: (amount: number) => void
 }
 
 export function ParamsCard({ 
   proportion, 
   risk, 
-  leverage, 
+  leverage,
+  betAmount = 20,
   onProportionChange,
   onRiskChange,
-  onLeverageChange 
+  onLeverageChange,
+  onBetAmountChange
 }: ParamsCardProps) {
   const [localStopLoss, setLocalStopLoss] = useState(risk.stopLossPct)
   const [localTakeProfit, setLocalTakeProfit] = useState(risk.takeProfitPct)
   const [localLeverage, setLocalLeverage] = useState(leverage)
   const [localLongPct, setLocalLongPct] = useState(proportion.longPct)
+  const [localBetAmount, setLocalBetAmount] = useState(betAmount)
+
+  // Sync local state with prop changes (e.g., from URL params)
+  useEffect(() => {
+    setLocalStopLoss(risk.stopLossPct)
+  }, [risk.stopLossPct])
+
+  useEffect(() => {
+    setLocalTakeProfit(risk.takeProfitPct)
+  }, [risk.takeProfitPct])
+
+  useEffect(() => {
+    setLocalLeverage(leverage)
+  }, [leverage])
+
+  useEffect(() => {
+    setLocalBetAmount(betAmount)
+  }, [betAmount])
 
   const handleLongPctChange = (delta: number) => {
     hapticFeedback('selection')
@@ -58,6 +80,13 @@ export function ParamsCard({
     onLeverageChange?.(newLeverage)
   }
 
+  const handleBetAmountChange = (delta: number) => {
+    hapticFeedback('selection')
+    const newValue = Math.max(10, Math.min(1000, localBetAmount + delta))
+    setLocalBetAmount(newValue)
+    onBetAmountChange?.(newValue)
+  }
+
   const leverageOptions = [1, 2, 3, 5, 7, 10, 15, 20, 25]
   
   return (
@@ -67,90 +96,6 @@ export function ParamsCard({
           Trade Parameters
         </span>
       </div>
-      
-      {/* Proportion Section */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-medium text-text-secondary">Allocation</span>
-          <div className="flex items-center gap-1">
-            <input
-              type="number"
-              value={localLongPct}
-              onChange={(e) => {
-                const val = parseInt(e.target.value)
-                if (!isNaN(val) && val >= 0 && val <= 100) {
-                  setLocalLongPct(val)
-                  onProportionChange?.(val)
-                  hapticFeedback('selection')
-                }
-              }}
-              onBlur={(e) => {
-                const val = parseInt(e.target.value)
-                if (isNaN(val) || val < 0) setLocalLongPct(0)
-                else if (val > 100) setLocalLongPct(100)
-              }}
-              className="w-10 text-sm font-bold text-accent-success bg-transparent text-right outline-none focus:ring-2 focus:ring-accent-success/30 rounded py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              min="0"
-              max="100"
-            />
-            <span className="text-sm font-bold text-accent-success">%</span>
-            <span className="text-text-muted mx-1">/</span>
-            <span className="text-sm font-bold text-accent-danger">{100 - localLongPct}%</span>
-          </div>
-        </div>
-        
-        {/* Allocation Controls */}
-        <div className="flex items-center gap-3 mb-3">
-          <button
-            onClick={() => handleLongPctChange(-10)}
-            className="w-10 h-10 rounded-xl bg-accent-danger/10 border border-accent-danger/20 flex items-center justify-center hover:bg-accent-danger/20 transition-colors btn-press"
-          >
-            <Minus className="w-5 h-5 text-accent-danger" />
-          </button>
-          
-          {/* Split bar with shine effect */}
-          <div className="flex-1 h-6 rounded-full overflow-hidden flex relative border border-border">
-            <div 
-              className="relative transition-all duration-300"
-              style={{ 
-                width: `${localLongPct}%`,
-                background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 50%, #22c55e 100%)',
-              }}
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
-            </div>
-            <div 
-              className="relative transition-all duration-300"
-              style={{ 
-                width: `${100 - localLongPct}%`,
-                background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #ef4444 100%)',
-              }}
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" style={{ animationDelay: '1s' }} />
-            </div>
-          </div>
-          
-          <button
-            onClick={() => handleLongPctChange(10)}
-            className="w-10 h-10 rounded-xl bg-accent-success/10 border border-accent-success/20 flex items-center justify-center hover:bg-accent-success/20 transition-colors btn-press"
-          >
-            <Plus className="w-5 h-5 text-accent-success" />
-          </button>
-        </div>
-        
-        {/* Labels */}
-        <div className="flex justify-between text-xs">
-          <span className="text-accent-success font-medium">
-            Long {localLongPct}%
-          </span>
-          <span className="text-accent-danger font-medium">
-            Short {100 - localLongPct}%
-          </span>
-        </div>
-      </div>
-      
-      {/* Divider */}
-      <div className="h-px bg-border" />
       
       {/* SL/TP Section */}
       <div>
@@ -247,6 +192,99 @@ export function ParamsCard({
         </div>
       </div>
       
+      {/* Divider */}
+      <div className="h-px bg-border" />
+      
+      {/* Bet Amount Section */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm font-medium text-text-secondary">Bet Amount</span>
+          <div className="flex items-center">
+            <span className="text-sm font-bold text-accent-primary">$</span>
+            <input
+              type="number"
+              value={localBetAmount}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value)
+                if (!isNaN(val) && val >= 10) {
+                  setLocalBetAmount(val)
+                  onBetAmountChange?.(val)
+                  hapticFeedback('selection')
+                }
+              }}
+              onBlur={(e) => {
+                const val = parseFloat(e.target.value)
+                if (isNaN(val) || val < 10) {
+                  setLocalBetAmount(10)
+                  onBetAmountChange?.(10)
+                }
+              }}
+              className="w-16 text-sm font-bold text-accent-primary bg-transparent text-right outline-none focus:ring-2 focus:ring-accent-primary/30 rounded py-0.5 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              min="10"
+              step="10"
+            />
+          </div>
+        </div>
+        
+        {/* Bet Amount Controls */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => handleBetAmountChange(-10)}
+            disabled={localBetAmount <= 10}
+            className="w-10 h-10 rounded-xl bg-accent-danger/10 border border-accent-danger/20 flex items-center justify-center hover:bg-accent-danger/20 transition-colors btn-press disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Minus className="w-5 h-5 text-accent-danger" />
+          </button>
+          
+          {/* Amount visualization bar */}
+          <div className="flex-1 h-6 rounded-full overflow-hidden relative border border-border bg-bg-tertiary">
+            <div 
+              className="h-full transition-all duration-300 relative"
+              style={{ 
+                width: `${Math.min(100, (localBetAmount / 200) * 100)}%`,
+                background: 'linear-gradient(135deg, #a3e635 0%, #65a30d 50%, #a3e635 100%)',
+              }}
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
+            </div>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-xs font-bold text-white drop-shadow-sm">${localBetAmount}</span>
+            </div>
+          </div>
+          
+          <button
+            onClick={() => handleBetAmountChange(10)}
+            className="w-10 h-10 rounded-xl bg-accent-success/10 border border-accent-success/20 flex items-center justify-center hover:bg-accent-success/20 transition-colors btn-press"
+          >
+            <Plus className="w-5 h-5 text-accent-success" />
+          </button>
+        </div>
+        
+        {/* Quick amount buttons */}
+        <div className="flex gap-2 mt-3">
+          {[20, 50, 100, 200].map((amount) => (
+            <button
+              key={amount}
+              onClick={() => {
+                hapticFeedback('selection')
+                setLocalBetAmount(amount)
+                onBetAmountChange?.(amount)
+              }}
+              className={`
+                flex-1 py-2 rounded-lg text-xs font-bold transition-all btn-press
+                ${localBetAmount === amount 
+                  ? 'bg-accent-primary text-black' 
+                  : 'bg-bg-tertiary text-text-secondary hover:bg-bg-tertiary/80'}
+              `}
+            >
+              ${amount}
+            </button>
+          ))}
+        </div>
+        
+        <p className="text-xs text-text-muted mt-2">Min: $10 • Split equally between long & short</p>
+      </div>
+
       {/* Divider */}
       <div className="h-px bg-border" />
       

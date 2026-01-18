@@ -133,6 +133,7 @@ export function TradeConfirmPage() {
   const [takeProfit, setTakeProfit] = useState(presetTrade.risk.takeProfitPct)
   const [leverage, setLeverage] = useState(presetTrade.leverage)
   const [longPct, setLongPct] = useState(50)
+  const [betAmount, setBetAmount] = useState(20) // Default $20 total ($10 per side) - matches backend cap
 
   // Get initial coins with prices - handles both "BTC" and "BTC-PERP" formats
   const getInitialCoin = (symbol: string): Coin => {
@@ -393,9 +394,10 @@ export function TradeConfirmPage() {
   }
 
   // Calculate risk/reward based on current parameters
-  const notionalAmount = 1000 // Base notional for calculation
-  const potentialLoss = (notionalAmount * (stopLoss / 100) * leverage)
-  const potentialProfit = (notionalAmount * (takeProfit / 100) * leverage)
+  // betAmount is total position size (split between long and short)
+  const notionalPerSide = betAmount / 2 // Split between long and short
+  const potentialLoss = (betAmount * (stopLoss / 100) * leverage)
+  const potentialProfit = (betAmount * (takeProfit / 100) * leverage)
   const riskRewardRatio = takeProfit / stopLoss
 
   const riskRewardData = {
@@ -508,61 +510,16 @@ export function TradeConfirmPage() {
           marketType={presetTrade.marketType}
         />
 
-        {/* Basket Composition - Show if LLM generated basket */}
-        {(longBasket.length > 0 || shortBasket.length > 0) && (
-          <div className="card p-4 space-y-3 animate-fade-up" style={{ animationDelay: '150ms' }}>
-            <div className="text-xs font-medium text-text-muted uppercase tracking-wider">
-              🧺 Basket Composition
-            </div>
-            
-            {longBasket.length > 0 && (
-              <div>
-                <div className="text-sm font-medium text-accent-success mb-2">📗 Long Basket</div>
-                <div className="flex flex-wrap gap-2">
-                  {longBasket.map((asset, idx) => (
-                    <div key={idx} className="px-3 py-1.5 bg-accent-success/10 border border-accent-success/20 rounded-lg text-xs">
-                      <span className="font-medium">{asset.coin}</span>
-                      <span className="text-text-muted ml-1">({(asset.weight * 100).toFixed(0)}%)</span>
-                      <span className="text-text-muted ml-2">${asset.notional?.toFixed(0) || 0}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {shortBasket.length > 0 && (
-              <div>
-                <div className="text-sm font-medium text-accent-danger mb-2">📕 Short Basket</div>
-                <div className="flex flex-wrap gap-2">
-                  {shortBasket.map((asset, idx) => (
-                    <div key={idx} className="px-3 py-1.5 bg-accent-danger/10 border border-accent-danger/20 rounded-lg text-xs">
-                      <span className="font-medium">{asset.coin}</span>
-                      <span className="text-text-muted ml-1">({(asset.weight * 100).toFixed(0)}%)</span>
-                      <span className="text-text-muted ml-2">${asset.notional?.toFixed(0) || 0}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {basketCategory && (
-              <div className="pt-2 border-t border-border">
-                <span className="px-3 py-1.5 bg-accent-primary/10 text-accent-primary rounded-lg text-xs font-medium">
-                  🚀 Strategy: {basketCategory.replace(/_/g, ' ')}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Trade Parameters */}
         <ParamsCard 
           proportion={{ longPct, shortPct }}
           risk={{ stopLossPct: stopLoss, takeProfitPct: takeProfit }}
           leverage={leverage}
+          betAmount={betAmount}
           onProportionChange={handleProportionChange}
           onRiskChange={handleRiskChange}
           onLeverageChange={handleLeverageChange}
+          onBetAmountChange={setBetAmount}
         />
 
         {/* Risk/Reward Card */}
@@ -580,12 +537,12 @@ export function TradeConfirmPage() {
           pair: {
             long: { 
               symbol: `${longCoins[0]?.ticker || 'BTC'}-PERP`, 
-              notional: 10.0,  // Fixed $10 per side
+              notional: notionalPerSide,  // Half of bet amount
               leverage 
             },
             short: { 
               symbol: `${shortCoins[0]?.ticker || 'ETH'}-PERP`, 
-              notional: 10.0,  // Fixed $10 per side
+              notional: notionalPerSide,  // Half of bet amount
               leverage 
             },
           },

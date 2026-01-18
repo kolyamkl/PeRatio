@@ -24,50 +24,107 @@ type TabValue = 'Open' | 'Closed'
 
 // API response type from backend
 interface ApiTrade {
-  tradeId: string
-  pair: {
+  tradeId?: string
+  trade_id?: string
+  pair?: {
     long: { symbol: string; notional: number; leverage: number }
     short: { symbol: string; notional: number; leverage: number }
   }
-  takeProfitRatio: number
-  stopLossRatio: number
-  reasoning: string
-  status: string
-  expiresAt: string | null
+  // New format from Pear positions API
+  pair_long_symbol?: string
+  pair_short_symbol?: string
+  pair_long_notional?: number
+  pair_short_notional?: number
+  pair_long_leverage?: number
+  pair_short_leverage?: number
+  pair_long_entry_price?: number
+  pair_short_entry_price?: number
+  takeProfitRatio?: number
+  take_profit_ratio?: number
+  stopLossRatio?: number
+  stop_loss_ratio?: number
+  reasoning?: string
+  status?: string
+  expiresAt?: string | null
+  pnl_usd?: number
+  pnl_pct?: number
+  created_at?: string
 }
 
 // Convert API trade to frontend Trade format
 function apiTradeToTrade(apiTrade: ApiTrade): Trade {
-  const longSymbol = apiTrade.pair.long.symbol.replace('-PERP', '')
-  const shortSymbol = apiTrade.pair.short.symbol.replace('-PERP', '')
+  // Handle both old and new API formats
+  let longSymbol: string
+  let shortSymbol: string
+  let longNotional: number
+  let shortNotional: number
+  let leverage: number
+  let takeProfitRatio: number
+  let stopLossRatio: number
+  let tradeId: string
+  let pnlUsd: number
+  let pnlPct: number
+  let entryPriceLong: number
+  let entryPriceShort: number
+  
+  if (apiTrade.pair) {
+    // Old format
+    longSymbol = apiTrade.pair.long.symbol.replace('-PERP', '')
+    shortSymbol = apiTrade.pair.short.symbol.replace('-PERP', '')
+    longNotional = apiTrade.pair.long.notional
+    shortNotional = apiTrade.pair.short.notional
+    leverage = apiTrade.pair.long.leverage
+    takeProfitRatio = apiTrade.takeProfitRatio || 0.1
+    stopLossRatio = apiTrade.stopLossRatio || -0.05
+    tradeId = apiTrade.tradeId || ''
+    pnlUsd = 0
+    pnlPct = 0
+    entryPriceLong = 0
+    entryPriceShort = 0
+  } else {
+    // New format from Pear positions
+    longSymbol = (apiTrade.pair_long_symbol || '').replace('-PERP', '')
+    shortSymbol = (apiTrade.pair_short_symbol || '').replace('-PERP', '')
+    longNotional = apiTrade.pair_long_notional || 0
+    shortNotional = apiTrade.pair_short_notional || 0
+    leverage = apiTrade.pair_long_leverage || 1
+    takeProfitRatio = apiTrade.take_profit_ratio || 0.1
+    stopLossRatio = apiTrade.stop_loss_ratio || -0.05
+    tradeId = apiTrade.trade_id || ''
+    pnlUsd = apiTrade.pnl_usd || 0
+    pnlPct = apiTrade.pnl_pct || 0
+    entryPriceLong = apiTrade.pair_long_entry_price || 0
+    entryPriceShort = apiTrade.pair_short_entry_price || 0
+  }
   
   const longCoin = availableCoins.find(c => c.ticker === longSymbol) || { name: longSymbol, ticker: longSymbol }
   const shortCoin = availableCoins.find(c => c.ticker === shortSymbol) || { name: shortSymbol, ticker: shortSymbol }
   
-  const totalNotional = apiTrade.pair.long.notional + apiTrade.pair.short.notional
-  const longPct = Math.round((apiTrade.pair.long.notional / totalNotional) * 100)
+  const totalNotional = longNotional + shortNotional
+  const longPct = totalNotional > 0 ? Math.round((longNotional / totalNotional) * 100) : 50
   
   return {
-    id: apiTrade.tradeId,
+    id: tradeId,
     longCoin,
     shortCoin,
-    status: apiTrade.status === 'OPEN' ? 'open' : apiTrade.status === 'CLOSED' ? 'closed' : 'open',
-    openedAt: new Date().toISOString(), // API doesn't provide this yet
+    status: (apiTrade.status || '').toUpperCase() === 'OPEN' ? 'open' : 
+            (apiTrade.status || '').toUpperCase() === 'CLOSED' ? 'closed' : 'open',
+    openedAt: apiTrade.created_at || new Date().toISOString(),
     closedAt: null,
     notionalUsd: totalNotional,
-    leverage: apiTrade.pair.long.leverage,
-    stopLossPct: Math.abs(apiTrade.stopLossRatio * 100),
-    takeProfitPct: Math.abs(apiTrade.takeProfitRatio * 100),
+    leverage,
+    stopLossPct: Math.abs(stopLossRatio * 100),
+    takeProfitPct: Math.abs(takeProfitRatio * 100),
     longPct,
     shortPct: 100 - longPct,
-    pnlUsd: 0, // Will be calculated from positions
-    pnlPct: 0,
+    pnlUsd,
+    pnlPct,
     details: {
-      entryPriceLong: longCoin.price || 0,
-      entryPriceShort: shortCoin.price || 0,
-      currentPriceLong: longCoin.price || 0,
-      currentPriceShort: shortCoin.price || 0,
-      orderId: apiTrade.tradeId,
+      entryPriceLong: entryPriceLong || longCoin.price || 0,
+      entryPriceShort: entryPriceShort || shortCoin.price || 0,
+      currentPriceLong: longCoin.price || entryPriceLong || 0,
+      currentPriceShort: shortCoin.price || entryPriceShort || 0,
+      orderId: tradeId,
       strategyTag: 'AI Signal',
       correlation: 0.85,
       cointegration: true,
@@ -79,7 +136,7 @@ function apiTradeToTrade(apiTrade: ApiTrade): Trade {
       volatility: 25,
       timeframe: '1h',
       tradingEngine: 'Hyperliquid',
-      remarks: apiTrade.reasoning,
+      remarks: apiTrade.reasoning || 'Pair trade via Pear Protocol',
     },
   }
 }
@@ -94,7 +151,7 @@ export function TradesPage() {
   const [allApiTrades, setAllApiTrades] = useState<Trade[]>([])
   const navigate = useNavigate()
   
-  // Fetch trades from API
+  // Fetch trades from API (both local trades and Pear positions)
   const fetchTrades = async () => {
     setLoading(true)
     setError(null)
@@ -102,22 +159,41 @@ export function TradesPage() {
     console.log('[TradesPage] Backend URL:', backendUrl || '(using proxy)')
     
     try {
+      // Fetch real positions from Pear Protocol API
+      const posRes = await fetch(`${backendUrl}/api/positions`, {
+        headers: { 'bypass-tunnel-reminder': 'true' }
+      })
+      console.log('[TradesPage] Positions response status:', posRes.status)
+      
+      let pearPositions: Trade[] = []
+      if (posRes.ok) {
+        const posData = await posRes.json()
+        console.log('[TradesPage] ✅ Received positions from Pear API:', posData)
+        
+        if (posData.positions && Array.isArray(posData.positions)) {
+          // Convert Pear positions to Trade format using apiTradeToTrade
+          pearPositions = posData.positions.map((pos: ApiTrade) => apiTradeToTrade(pos))
+          console.log('[TradesPage] Converted Pear positions:', pearPositions)
+        }
+      }
+      
+      // Also fetch local trades from database
       const res = await fetch(`${backendUrl}/api/trades?limit=100`, {
         headers: { 'bypass-tunnel-reminder': 'true' }
       })
-      console.log('[TradesPage] Response status:', res.status)
+      console.log('[TradesPage] Trades response status:', res.status)
       
-      if (!res.ok) {
-        throw new Error(`Failed to fetch trades: ${res.status}`)
+      let localTrades: Trade[] = []
+      if (res.ok) {
+        const apiTrades: ApiTrade[] = await res.json()
+        console.log('[TradesPage] ✅ Received', apiTrades.length, 'local trades from API')
+        localTrades = apiTrades.map(apiTradeToTrade)
       }
       
-      const apiTrades: ApiTrade[] = await res.json()
-      console.log('[TradesPage] ✅ Received', apiTrades.length, 'trades from API')
-      console.log('[TradesPage] Raw API data:', apiTrades)
-      
-      const trades = apiTrades.map(apiTradeToTrade)
-      console.log('[TradesPage] Converted trades:', trades)
-      setAllApiTrades(trades)
+      // Combine: Pear positions first, then local trades
+      const allTrades = [...pearPositions, ...localTrades]
+      console.log('[TradesPage] Total trades:', allTrades.length)
+      setAllApiTrades(allTrades)
     } catch (err) {
       console.error('[TradesPage] ❌ Error fetching trades:', err)
       setError(err instanceof Error ? err.message : 'Failed to load trades')

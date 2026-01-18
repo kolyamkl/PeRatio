@@ -38,6 +38,7 @@ except ImportError as e:
     logger_temp.warning(f"[LLLM] ⚠️ SignalGenerator not available: {e}")
 from database import engine, get_session, init_db
 from models import NotificationSetting, Trade
+from pear_api import fetch_open_positions, parse_positions_for_notification
 from schemas import (
     ExecuteTradeRequest,
     GenerateTradeRequest,
@@ -623,9 +624,16 @@ Return ONLY valid JSON."""
     for asset in short_basket:
         logger.info(f"[LLM]   SHORT {asset['coin']}: ${asset['notional']}")
     
-    # Fixed position sizing: 10% SL, 20% TP
-    sl_pct = 10.0  # Fixed 10% stop loss
-    tp_pct = 20.0  # Fixed 20% take profit
+    # Use LLM's recommended TP/SL values
+    pos_sizing = signal_data.get("position_sizing", {})
+    sl_pct = pos_sizing.get("recommended_sl_percent", 10.0)  # Default 10% if not provided
+    tp_pct = pos_sizing.get("recommended_tp_percent", 20.0)  # Default 20% if not provided
+    
+    # Clamp to valid range (3-15% SL, 5-30% TP)
+    sl_pct = max(3.0, min(15.0, float(sl_pct)))
+    tp_pct = max(5.0, min(30.0, float(tp_pct)))
+    
+    logger.info(f"[LLM] 📊 LLM recommended: TP={tp_pct}%, SL={sl_pct}%")
     
     # Use primary asset from each basket for the main pair
     # (For compatibility with existing Trade model)
@@ -763,6 +771,105 @@ def get_all_trades(
     return [trade_to_response(trade) for trade in trades]
 
 
+@app.get("/api/positions")
+async def get_pear_positions() -> Any:
+    """
+    Fetch real open positions from Pear Protocol API.
+    Returns positions with PnL data formatted for the frontend.
+    """
+    logger.info("[API] 📊 Fetching real positions from Pear Protocol...")
+    
+    # Fetch positions from Pear API
+    raw_positions = await fetch_open_positions(
+        api_url=settings.pear_api_url,
+        access_token=settings.pear_access_token
+    )
+    
+    if not raw_positions.get("success"):
+        logger.warning(f"[API] ⚠️ Failed to fetch positions: {raw_positions.get('error')}")
+        return {
+            "success": False,
+            "error": raw_positions.get("error", "Unknown error"),
+            "positions": [],
+            "total_pnl": 0.0,
+            "total_pnl_pct": 0.0,
+            "total_notional": 0.0
+        }
+    
+    # Parse raw Pear API response directly
+    # Format: [{positionId, longAssets: [{coin, entryPrice, leverage, ...}], shortAssets: [...], unrealizedPnl, positionValue, ...}]
+    positions_list = raw_positions.get("positions", [])
+    
+    trades_format = []
+    total_pnl = 0.0
+    total_notional = 0.0
+    
+    for i, pos in enumerate(positions_list):
+        # Extract long asset info (first asset in longAssets array)
+        long_assets = pos.get("longAssets", [])
+        long_coin = long_assets[0].get("coin", "UNKNOWN") if long_assets else "UNKNOWN"
+        long_entry_price = long_assets[0].get("entryPrice", 0) if long_assets else 0
+        long_leverage = long_assets[0].get("leverage", 1) if long_assets else 1
+        long_value = long_assets[0].get("positionValue", 0) if long_assets else 0
+        
+        # Extract short asset info (first asset in shortAssets array)
+        short_assets = pos.get("shortAssets", [])
+        short_coin = short_assets[0].get("coin", "UNKNOWN") if short_assets else "UNKNOWN"
+        short_entry_price = short_assets[0].get("entryPrice", 0) if short_assets else 0
+        short_leverage = short_assets[0].get("leverage", 1) if short_assets else 1
+        short_value = short_assets[0].get("positionValue", 0) if short_assets else 0
+        
+        # Overall position data
+        pnl = pos.get("unrealizedPnl", 0)
+        pnl_pct = pos.get("unrealizedPnlPercentage", 0) * 100  # Convert to percentage
+        notional = pos.get("positionValue", long_value + short_value)
+        
+        # Take profit / Stop loss
+        tp_obj = pos.get("takeProfit", {})
+        sl_obj = pos.get("stopLoss", {})
+        take_profit = tp_obj.get("value", 10) if isinstance(tp_obj, dict) else 10
+        stop_loss = sl_obj.get("value", 5) if isinstance(sl_obj, dict) else 5
+        
+        total_pnl += pnl
+        total_notional += notional
+        
+        trade_obj = {
+            "trade_id": pos.get("positionId", f"pear_pos_{i}"),
+            "pair_long_symbol": long_coin,
+            "pair_short_symbol": short_coin,
+            "pair_long_notional": long_value,
+            "pair_short_notional": short_value,
+            "pair_long_entry_price": long_entry_price,
+            "pair_short_entry_price": short_entry_price,
+            "pair_long_leverage": long_leverage,
+            "pair_short_leverage": short_leverage,
+            "take_profit_ratio": take_profit / 100,  # e.g., 0.20 for 20%
+            "stop_loss_ratio": -stop_loss / 100,     # e.g., -0.10 for 10%
+            "status": "OPEN",
+            "pnl_usd": pnl,
+            "pnl_pct": pnl_pct,
+            "reasoning": f"Pair trade: Long {long_coin}, Short {short_coin}",
+            "created_at": pos.get("createdAt", datetime.utcnow().isoformat()),
+            "updated_at": pos.get("updatedAt", datetime.utcnow().isoformat()),
+        }
+        trades_format.append(trade_obj)
+        
+        logger.info(f"[API] Position {i+1}: Long {long_coin} / Short {short_coin}, PnL: ${pnl:.4f} ({pnl_pct:.2f}%)")
+    
+    total_pnl_pct = (total_pnl / total_notional * 100) if total_notional > 0 else 0
+    
+    logger.info(f"[API] ✅ Returning {len(trades_format)} positions from Pear Protocol (Total PnL: ${total_pnl:.4f})")
+    
+    return {
+        "success": True,
+        "positions": trades_format,
+        "total_pnl": total_pnl,
+        "total_pnl_pct": total_pnl_pct,
+        "total_notional": total_notional,
+        "count": len(trades_format)
+    }
+
+
 @app.get("/api/trades/{trade_id}", response_model=TradeSchema)
 def get_trade(
     trade_id: str = Path(...), session: Session = Depends(get_session)
@@ -896,10 +1003,10 @@ def execute_trade(
             
             total_notional = trade.pair_long_notional + trade.pair_short_notional
             
-            # Cap total notional to max $10
-            if total_notional > 10:
-                logger.warning(f"[PEAR] ⚠️ Total notional ${total_notional} exceeds $10 cap, adjusting...")
-                total_notional = 10.0
+            # Cap total notional to max $20
+            if total_notional > 20:
+                logger.warning(f"[PEAR] ⚠️ Total notional ${total_notional} exceeds $20 cap, adjusting...")
+                total_notional = 20.0
             
             # Build position request - supports multi-asset baskets with TP/SL
             position_data = {
@@ -1166,30 +1273,57 @@ def is_due(setting: NotificationSetting, now_utc: datetime) -> bool:
 
 
 def build_notification_message(
-    trades: List[Trade], timestamp: datetime, mini_app_url: str
+    positions_data: Dict[str, Any], timestamp: datetime, mini_app_url: str
 ) -> Dict[str, Any]:
-    open_trades = [t for t in trades if t.status == "OPEN"]
-    total_notional = sum((t.pair_long_notional or 0) + (t.pair_short_notional or 0) for t in open_trades)
-    total_positions = len(open_trades)
-    total_pnl = 0.0
-    total_pnl_pct = 0.0
-
+    """
+    Build notification message from Pear Protocol positions data.
+    
+    Args:
+        positions_data: Parsed positions from parse_positions_for_notification()
+        timestamp: Current timestamp
+        mini_app_url: URL for the mini app button
+    """
+    total_pnl = positions_data.get("total_pnl", 0.0)
+    total_pnl_pct = positions_data.get("total_pnl_pct", 0.0)
+    total_notional = positions_data.get("total_notional", 0.0)
+    positions = positions_data.get("positions", [])
+    has_positions = positions_data.get("has_positions", False)
+    
+    # Format PnL with appropriate emoji
+    pnl_emoji = "📈" if total_pnl >= 0 else "📉"
+    pnl_color = "🟢" if total_pnl >= 0 else "🔴"
+    
     lines: List[str] = []
-    for t in open_trades:
+    for pos in positions:
+        long_asset = pos.get("long_asset", "")
+        short_asset = pos.get("short_asset", "")
+        pnl = pos.get("pnl", 0)
+        pnl_pct = pos.get("pnl_pct", 0)
+        leverage = pos.get("leverage", 1)
+        
+        # Format pair name
+        if short_asset:
+            pair_name = f"{long_asset}/{short_asset}"
+        else:
+            pair_name = long_asset
+        
+        # Position PnL emoji
+        pos_emoji = "🟢" if pnl >= 0 else "🔴"
+        
         lines.append(
-            f"- {t.pair_long_symbol} vs {t.pair_short_symbol} | {t.pair_long_leverage}x/{t.pair_short_leverage}x | TP {t.take_profit_ratio*100:.1f}% | SL {t.stop_loss_ratio*100:.1f}%"
+            f"{pos_emoji} {pair_name} | {leverage}x | {pnl_pct:+.1f}% (${pnl:+.2f})"
         )
 
-    if not lines:
-        body = "No open positions. Account idle."
+    if not has_positions:
+        body = "💭 No open positions. Account idle."
     else:
         body = "\n".join(lines)
 
-    header = f"📈 Portfolio Update — {timestamp.strftime('%Y-%m-%d %H:%M UTC')}"
+    header = f"{pnl_emoji} Portfolio Update — {timestamp.strftime('%Y-%m-%d %H:%M UTC')}"
     overview = (
-        f"Balance (est): ${total_notional:,.2f}\n"
-        f"Open Positions: {total_positions}\n"
-        f"P/L: {total_pnl_pct:+.2f}% (${total_pnl:,.2f})"
+        f"💰 Position Value: ${total_notional:,.2f}\n"
+        f"📊 Open Positions: {len(positions)}\n"
+        f"{pnl_color} P/L: {total_pnl_pct:+.2f}% (${total_pnl:+,.2f})"
     )
 
     message = f"{header}\n\n{overview}\n\n{body}\n\nTap below for details."
@@ -1197,7 +1331,7 @@ def build_notification_message(
         "inline_keyboard": [
             [
                 {
-                    "text": "View Dashboard",
+                    "text": "📱 View Dashboard",
                     "web_app": {"url": mini_app_url},
                 }
             ]
@@ -1208,21 +1342,46 @@ def build_notification_message(
 
 
 async def send_notification(setting: NotificationSetting) -> None:
+    """Send PnL notification by fetching real positions from Pear Protocol API."""
     if not settings.bot_token or not telegram_app:
+        logger.warning("[Notification] Bot not configured, skipping notification")
         return
 
     now_utc = datetime.utcnow()
-    with Session(engine) as session:
-        trades = session.exec(select(Trade).where(Trade.user_id == setting.user_id)).all()
-
-    mini_app_url = MINI_APP_URL or "https://example.com"
-    payload = build_notification_message(trades, now_utc, mini_app_url)
-
-    await telegram_app.bot.send_message(
-        chat_id=setting.chat_id,
-        text=payload["text"],
-        reply_markup=payload["reply_markup"],
+    
+    # Fetch real positions from Pear Protocol API
+    logger.info(f"[Notification] Fetching positions for user {setting.user_id}")
+    raw_positions = await fetch_open_positions(
+        api_url=settings.pear_api_url,
+        access_token=settings.pear_access_token
     )
+    
+    # Parse positions for notification format
+    positions_data = parse_positions_for_notification(raw_positions)
+    
+    if not raw_positions.get("success"):
+        logger.warning(f"[Notification] Failed to fetch positions: {raw_positions.get('error')}")
+        # Still send notification but indicate the error
+        positions_data = {
+            "total_pnl": 0.0,
+            "total_pnl_pct": 0.0,
+            "total_notional": 0.0,
+            "positions": [],
+            "has_positions": False
+        }
+    
+    mini_app_url = MINI_APP_URL or "https://example.com"
+    payload = build_notification_message(positions_data, now_utc, mini_app_url)
+
+    try:
+        await telegram_app.bot.send_message(
+            chat_id=setting.chat_id,
+            text=payload["text"],
+            reply_markup=payload["reply_markup"],
+        )
+        logger.info(f"[Notification] Sent to chat {setting.chat_id} - {len(positions_data.get('positions', []))} positions")
+    except Exception as e:
+        logger.error(f"[Notification] Failed to send to chat {setting.chat_id}: {e}")
 
 
 async def notification_worker() -> None:
