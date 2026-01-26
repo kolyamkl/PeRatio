@@ -51,7 +51,7 @@ echo -e "\n${BLUE}Starting Backend (FastAPI)...${NC}"
 cd "$BACKEND_DIR"
 source .venv/bin/activate
 pip install -q -r requirements.txt
-nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload > "$LOG_DIR/backend.log" 2>&1 &
+nohup python -m uvicorn main:app --host 0.0.0.0 --port 8000 > "$LOG_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!
 echo "Backend PID: $BACKEND_PID"
 

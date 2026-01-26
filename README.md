@@ -57,7 +57,7 @@ graph TB
     subgraph "⚙️ Backend"
         API[FastAPI<br/>Port 8000]
         LLM[LLLM<br/>Signal Generator]
-        DB[(SQLite)]
+        DB[(PostgreSQL)]
     end
     
     subgraph "🌐 External Services"
@@ -235,7 +235,7 @@ TG_TRADE/
 │   ├── backend/
 │   │   ├── main.py              # FastAPI app
 │   │   ├── config.py            # Environment settings
-│   │   ├── database.py          # SQLite + SQLModel
+│   │   ├── database.py          # PostgreSQL + SQLModel
 │   │   ├── models.py            # Trade, Position models
 │   │   ├── schemas.py           # Pydantic schemas
 │   │   ├── pear_api.py          # Pear Protocol client
@@ -298,13 +298,32 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment
+### 2. Setup PostgreSQL Database
+
+```bash
+# Install PostgreSQL (macOS)
+brew install postgresql@15
+brew services start postgresql@15
+
+# Create database
+createdb tg_trade
+
+# Or with custom user
+psql postgres
+CREATE DATABASE tg_trade;
+CREATE USER tg_user WITH PASSWORD 'your_password';
+GRANT ALL PRIVILEGES ON DATABASE tg_trade TO tg_user;
+\q
+```
+
+### 3. Configure Environment
 
 ```bash
 # Backend (.env)
 BOT_TOKEN=your_telegram_bot_token
 BACKEND_URL=https://your-backend.loca.lt
 MINI_APP_URL=https://your-frontend.ngrok-free.dev
+DATABASE_URL=postgresql://tg_user:your_password@localhost:5432/tg_trade
 OPENAI_API_KEY=sk-proj-...
 PEAR_ACCESS_TOKEN=eyJhbGci...
 PEAR_USER_WALLET=0x...
@@ -316,7 +335,7 @@ PEAR_API_URL=https://hl-v2.pearprotocol.io
 PEAR_CLIENT_ID=HLHackathon9
 ```
 
-### 3. Run Services
+### 4. Run Services
 
 ```bash
 # Terminal 1: Backend
@@ -332,7 +351,7 @@ lt --port 8000 --subdomain your-backend
 cd backend/lllm && python signal_generator.py --live
 ```
 
-### 4. Open in Telegram
+### 5. Open in Telegram
 
 1. Message `@peratio_bot` 
 2. Click "Open App" button
