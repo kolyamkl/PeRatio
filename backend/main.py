@@ -39,6 +39,30 @@ except ImportError as e:
 from database import engine, get_session, init_db
 from models import NotificationSetting, Trade
 from pear_api import fetch_open_positions, parse_positions_for_notification
+from pear_agent_api import fetch_pear_agent_signal
+
+# Path to latest Pear signal from Telegram monitor
+LATEST_PEAR_SIGNAL_FILE = os.path.join(os.path.dirname(__file__), "latest_pear_signal.json")
+
+def get_latest_pear_telegram_signal() -> Optional[Dict[str, Any]]:
+    """Read the latest signal saved by pear_monitor.py from Telegram @agentpear"""
+    if not os.path.exists(LATEST_PEAR_SIGNAL_FILE):
+        return None
+    try:
+        with open(LATEST_PEAR_SIGNAL_FILE, 'r', encoding='utf-8') as f:
+            signal = json.load(f)
+        # Check if signal is recent (within last 24 hours)
+        generated_at = signal.get('generated_at', '')
+        if generated_at:
+            from datetime import datetime
+            signal_time = datetime.fromisoformat(generated_at.replace('Z', '+00:00'))
+            age_hours = (datetime.now() - signal_time.replace(tzinfo=None)).total_seconds() / 3600
+            if age_hours > 24:
+                return None  # Signal too old
+        return signal
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Error reading pear signal file: {e}")
+        return None
 from schemas import (
     ExecuteTradeRequest,
     GenerateTradeRequest,
@@ -414,20 +438,22 @@ def notification_setting_to_schema(setting: NotificationSetting) -> Notification
 
 
 @app.post("/api/llm/generate-trade", response_model=GenerateTradeResponse)
-def generate_trade(
+async def generate_trade(
     payload: GenerateTradeRequest, session: Session = Depends(get_session)
 ) -> Any:
-    """Generate a multi-basket trade signal using LLLM SignalGenerator"""
+    """Generate a multi-basket trade signal using Pear Agent API or LLLM SignalGenerator"""
     trade_id = new_trade_id()
     user_id = payload.userId
     
     logger.info(f"")
     logger.info(f"{'='*60}")
-    logger.info(f"[LLM] 📊 NEW TRADE REQUEST")
+    logger.info(f"[TRADE] 📊 NEW TRADE REQUEST")
     logger.info(f"{'='*60}")
-    logger.info(f"[LLM] User ID: {user_id}")
-    logger.info(f"[LLM] Trade ID: {trade_id}")
-    logger.info(f"[LLM] LLLM Available: {LLLM_AVAILABLE}")
+    logger.info(f"[TRADE] User ID: {user_id}")
+    logger.info(f"[TRADE] Trade ID: {trade_id}")
+    logger.info(f"[TRADE] Pear Agent API: {'✅ ENABLED' if settings.use_pear_agent_api else '❌ DISABLED'}")
+    logger.info(f"[TRADE] Pear API Key: {'✅ SET' if settings.pear_agent_api_key else '❌ MISSING'}")
+    logger.info(f"[TRADE] LLLM Available: {LLLM_AVAILABLE}")
     
     # Check rate limit cache
     now = time.time()
@@ -435,8 +461,8 @@ def generate_trade(
         cached_time, cached_trade = _llm_cache[user_id]
         remaining = int(LLM_CACHE_TTL - (now - cached_time))
         if remaining > 0:
-            logger.info(f"[LLM] ⏱️ Rate limit active - using cached signal")
-            logger.info(f"[LLM] Wait {remaining}s for new signal")
+            logger.info(f"[TRADE] ⏱️ Rate limit active - using cached signal")
+            logger.info(f"[TRADE] Wait {remaining}s for new signal")
             # Return cached but with new trade_id - save to DB
             trade = Trade(
                 trade_id=trade_id,
@@ -461,7 +487,7 @@ def generate_trade(
             )
             session.add(trade)
             session.commit()
-            logger.info(f"[LLM] ✅ Cached trade saved: {trade_id}")
+            logger.info(f"[TRADE] ✅ Cached trade saved: {trade_id}")
             return trade_to_response(trade)
     
     # Initialize signal data
@@ -472,8 +498,84 @@ def generate_trade(
     confidence = None
     factor_analysis = None
     
-    # Try LLLM SignalGenerator first
-    if LLLM_AVAILABLE:
+    # PRIMARY: Try Pear Telegram Monitor signal first (from @agentpear)
+    pear_telegram_signal = get_latest_pear_telegram_signal()
+    if pear_telegram_signal:
+        try:
+            logger.info(f"")
+            logger.info(f"[TRADE] 🍐 PEAR TELEGRAM SIGNAL (@agentpear)")
+            logger.info(f"[TRADE] {'-'*40}")
+            logger.info(f"[TRADE] Using signal from pear_monitor.py...")
+            
+            signal_data = pear_telegram_signal
+            long_basket = signal_data.get("long_basket", [])
+            short_basket = signal_data.get("short_basket", [])
+            basket_category = signal_data.get("basket_category")
+            confidence = signal_data.get("confidence")
+            factor_analysis = signal_data.get("factor_analysis")
+            
+            logger.info(f"")
+            logger.info(f"[TRADE] ✅ PEAR TELEGRAM SIGNAL LOADED")
+            logger.info(f"[TRADE] {'-'*40}")
+            logger.info(f"[TRADE] Category: {basket_category}")
+            logger.info(f"[TRADE] Confidence: {confidence}/10")
+            logger.info(f"[TRADE] Long: {[a['coin'] for a in long_basket]}")
+            logger.info(f"[TRADE] Short: {[a['coin'] for a in short_basket]}")
+            
+            if factor_analysis:
+                logger.info(f"[TRADE] Z-Score: {factor_analysis.get('z_score')}")
+                logger.info(f"[TRADE] Correlation: {factor_analysis.get('correlation')}")
+                logger.info(f"[TRADE] Spread: {factor_analysis.get('spread')}")
+                
+        except Exception as e:
+            logger.error(f"[TRADE] ❌ Pear Telegram signal error: {e}")
+            signal_data = None
+    
+    # FALLBACK 1: Try Pear Agent API
+    if signal_data is None and settings.use_pear_agent_api and settings.pear_agent_api_key:
+        try:
+            logger.info(f"")
+            logger.info(f"[TRADE] 🍐 PEAR AGENT API (FALLBACK)")
+            logger.info(f"[TRADE] {'-'*40}")
+            logger.info(f"[TRADE] Fetching signal from api.pear.garden/watchlist...")
+            
+            signal_data = await fetch_pear_agent_signal(settings.pear_agent_api_key)
+            
+            if signal_data:
+                long_basket = signal_data.get("long_basket", [])
+                short_basket = signal_data.get("short_basket", [])
+                basket_category = signal_data.get("basket_category")
+                confidence = signal_data.get("confidence")
+                factor_analysis = signal_data.get("factor_analysis")
+                
+                logger.info(f"")
+                logger.info(f"[TRADE] ✅ PEAR SIGNAL RECEIVED")
+                logger.info(f"[TRADE] {'-'*40}")
+                logger.info(f"[TRADE] Category: {basket_category}")
+                logger.info(f"[TRADE] Confidence: {confidence}/10")
+                logger.info(f"[TRADE] Long: {[a['coin'] for a in long_basket]}")
+                logger.info(f"[TRADE] Short: {[a['coin'] for a in short_basket]}")
+                
+                if factor_analysis:
+                    logger.info(f"[TRADE] Z-Score: {factor_analysis.get('z_score')}")
+                    logger.info(f"[TRADE] Correlation: {factor_analysis.get('correlation')}")
+                    logger.info(f"[TRADE] Spread: {factor_analysis.get('spread')}")
+            else:
+                logger.warning(f"[TRADE] ⚠️ Pear Agent API returned no signals")
+                
+        except Exception as e:
+            logger.error(f"[TRADE] ❌ Pear Agent API error: {e}")
+            import traceback
+            logger.error(f"[TRADE] Traceback: {traceback.format_exc()}")
+            signal_data = None
+    else:
+        if not settings.pear_agent_api_key:
+            logger.warning(f"[TRADE] ⚠️ PEAR_AGENT_API_KEY not configured")
+        if not settings.use_pear_agent_api:
+            logger.info(f"[TRADE] ℹ️ Pear Agent API disabled in config")
+    
+    # FALLBACK 2: Try LLLM SignalGenerator (disabled - using Pear signals only)
+    if False and signal_data is None and settings.pear_agent_fallback_to_llm and LLLM_AVAILABLE:
         try:
             logger.info(f"")
             logger.info(f"[LLM] 🧠 LLLM SIGNAL GENERATOR")
@@ -540,11 +642,9 @@ def generate_trade(
             import traceback
             logger.error(f"[LLM] Traceback: {traceback.format_exc()}")
             signal_data = None
-    else:
-        logger.warning(f"[LLM] ⚠️ LLLM not available, using fallback OpenAI call")
     
-    # Fallback to direct OpenAI if LLLM failed
-    if signal_data is None and settings.openai_api_key:
+    # FALLBACK 2: Direct OpenAI if LLLM failed
+    if signal_data is None and settings.pear_agent_fallback_to_llm and settings.openai_api_key:
         logger.info(f"[LLM] 🔄 Fallback: Direct OpenAI call")
         try:
             client = OpenAI(api_key=settings.openai_api_key)
@@ -711,6 +811,84 @@ Return ONLY valid JSON."""
     logger.info(f"[LLM] ✅ TRADE GENERATION COMPLETE")
     logger.info(f"{'='*60}")
     return result
+
+
+@app.post("/api/pear-signal/broadcast")
+async def broadcast_pear_signal(signal_data: Dict[str, Any]) -> Any:
+    """
+    Broadcast a new Pear signal to all users via Telegram bot.
+    Called by pear_monitor.py when new signals arrive from @agentpear.
+    """
+    logger.info(f"")
+    logger.info(f"{'='*60}")
+    logger.info(f"[BROADCAST] 🍐 NEW PEAR SIGNAL RECEIVED")
+    logger.info(f"{'='*60}")
+    
+    long_basket = signal_data.get("long_basket", [])
+    short_basket = signal_data.get("short_basket", [])
+    
+    if not long_basket or not short_basket:
+        logger.warning("[BROADCAST] ⚠️ Invalid signal - missing baskets")
+        return {"success": False, "error": "Invalid signal format"}
+    
+    long_asset = long_basket[0].get("coin", "?")
+    short_asset = short_basket[0].get("coin", "?")
+    confidence = signal_data.get("confidence", 0)
+    factor_analysis = signal_data.get("factor_analysis", {})
+    thesis = signal_data.get("thesis", "")
+    
+    logger.info(f"[BROADCAST] Pair: {long_asset}/{short_asset}")
+    logger.info(f"[BROADCAST] Confidence: {confidence}/10")
+    logger.info(f"[BROADCAST] Z-Score: {factor_analysis.get('z_score', 'N/A')}")
+    
+    # Format message for Telegram
+    z_score = factor_analysis.get('z_score', 0)
+    correlation = factor_analysis.get('correlation', 0)
+    
+    message = (
+        f"🍐 *Agent Pear Signal*\n\n"
+        f"📊 *Pair:* {long_asset}/{short_asset}\n"
+        f"📈 *Z-Score:* {z_score}\n"
+        f"🔗 *Correlation:* {correlation:.2f}\n"
+        f"⭐ *Confidence:* {confidence}/10\n\n"
+        f"💡 _{thesis[:200]}_\n\n"
+        f"Tap /start to generate a trade from this signal!"
+    )
+    
+    # Send to all users who have interacted with the bot
+    # For now, log the message - in production, iterate over subscribers
+    logger.info(f"[BROADCAST] Message prepared for broadcast")
+    logger.info(f"[BROADCAST] {message[:100]}...")
+    
+    # If telegram_app is available, broadcast to known users
+    if telegram_app and telegram_app.bot:
+        try:
+            # Get notification settings to find users
+            with Session(engine) as session:
+                from sqlmodel import select
+                settings_list = session.exec(select(NotificationSetting)).all()
+                
+                sent_count = 0
+                for setting in settings_list:
+                    try:
+                        await telegram_app.bot.send_message(
+                            chat_id=setting.chat_id,
+                            text=message,
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                        sent_count += 1
+                        logger.info(f"[BROADCAST] ✅ Sent to chat {setting.chat_id}")
+                    except Exception as e:
+                        logger.error(f"[BROADCAST] ❌ Failed to send to {setting.chat_id}: {e}")
+                
+                logger.info(f"[BROADCAST] 📤 Broadcast complete: {sent_count} users notified")
+                return {"success": True, "sent_count": sent_count}
+        except Exception as e:
+            logger.error(f"[BROADCAST] ❌ Broadcast error: {e}")
+            return {"success": False, "error": str(e)}
+    else:
+        logger.warning("[BROADCAST] ⚠️ Telegram bot not available")
+        return {"success": False, "error": "Telegram bot not initialized"}
 
 
 @app.post("/api/trades/parse-message", response_model=TradeSchema)

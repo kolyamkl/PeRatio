@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     pear_user_wallet: str = ""
     pear_agent_wallet: str = ""
     pear_access_token: str = ""
+    
+    # Pear Agent API settings (https://api.pear.garden)
+    pear_agent_api_key: str = ""  # API key for Pear Agent signals
+    use_pear_agent_api: bool = True  # Toggle to use Pear Agent API for signals
+    pear_agent_fallback_to_llm: bool = True  # Fallback to LLM if Pear API fails
 
     def get_cors_list(self) -> List[str]:
         """Parse CORS origins from string"""
