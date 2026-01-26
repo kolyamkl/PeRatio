@@ -12,34 +12,22 @@ from zoneinfo import ZoneInfo
 
 import httpx
 import requests
-from openai import OpenAI
+# OpenAI import removed - using Agent Pear signals only
 from fastapi import Depends, FastAPI, HTTPException, Path, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 from config import get_settings
 
-# Add lllm path for SignalGenerator import
-_lllm_path = os.path.join(os.path.dirname(__file__), "lllm")
-if _lllm_path not in sys.path:
-    sys.path.insert(0, _lllm_path)
-    
-try:
-    from signal_generator import SignalGenerator
-    LLLM_AVAILABLE = True
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.info(f"[LLLM] ✅ SignalGenerator imported from {_lllm_path}")
-except ImportError as e:
-    LLLM_AVAILABLE = False
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.warning(f"[LLLM] ⚠️ SignalGenerator not available: {e}")
+# LLM imports removed - using Agent Pear signals only
 from database import engine, get_session, init_db
 from models import NotificationSetting, Trade
 from pear_api import fetch_open_positions, parse_positions_for_notification
 from pear_agent_api import fetch_pear_agent_signal
+from pear_monitor import start_monitor as start_pear_monitor, stop_monitor as stop_pear_monitor
 
 # Path to latest Pear signal from Telegram monitor
 LATEST_PEAR_SIGNAL_FILE = os.path.join(os.path.dirname(__file__), "latest_pear_signal.json")
@@ -115,15 +103,14 @@ logger.info("=" * 60)
 logger.info(f"BOT_TOKEN: {'✅ SET' if settings.bot_token else '❌ MISSING'}")
 logger.info(f"BACKEND_URL: {BACKEND_BASE}")
 logger.info(f"MINI_APP_URL: {MINI_APP_URL}")
-logger.info(f"OPENAI_API_KEY: {'✅ SET' if settings.openai_api_key else '❌ MISSING'}")
 logger.info(f"PEAR_ACCESS_TOKEN: {'✅ SET' if settings.pear_access_token else '❌ MISSING'}")
 logger.info(f"PEAR_USER_WALLET: {settings.pear_user_wallet or '❌ MISSING'}")
 logger.info(f"PEAR_AGENT_WALLET: {settings.pear_agent_wallet or '❌ MISSING'}")
 logger.info("=" * 60)
 
-# Rate limiting: cache LLM responses per user (disabled - fresh response every /start)
-_llm_cache: Dict[str, tuple[float, Dict]] = {}
-LLM_CACHE_TTL = 0  # seconds (0 = disabled, every /start generates fresh LLM response)
+# Rate limiting: cache signal responses per user (disabled - fresh response every /start)
+_signal_cache: Dict[str, tuple[float, Dict]] = {}
+SIGNAL_CACHE_TTL = 0  # seconds (0 = disabled, every /start generates fresh signal)
 
 
 def format_trade_message(trade: Dict[str, Any]) -> tuple[str, InlineKeyboardMarkup]:
@@ -270,6 +257,95 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     logger.info(f"[/start] ✅ Trade signal sent to user {user.id}")
 
 
+async def handle_stop_trade_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Handle stop trade callback when user presses a stop button.
+    Closes the position via Pear Protocol API and sends confirmation.
+    """
+    query = update.callback_query
+    if not query:
+        return
+    
+    await query.answer()  # Acknowledge the callback
+    
+    chat_id = query.message.chat_id if query.message else None
+    if not chat_id:
+        return
+    
+    # Parse callback data: "stop_trade:{position_id}"
+    callback_data = query.data or ""
+    if not callback_data.startswith("stop_trade:"):
+        return
+    
+    position_id = callback_data.replace("stop_trade:", "")
+    logger.info(f"[STOP_TRADE] User requested to stop position: {position_id}")
+    
+    try:
+        # Close position via Pear Protocol API
+        if settings.pear_access_token and settings.pear_api_url:
+            logger.info(f"[STOP_TRADE] Closing position {position_id} via Pear API...")
+            
+            response = requests.delete(
+                f'{settings.pear_api_url}/positions/{position_id}',
+                headers={
+                    'Authorization': f'Bearer {settings.pear_access_token}',
+                    'Content-Type': 'application/json'
+                },
+                timeout=30
+            )
+            
+            if response.status_code in [200, 201, 204]:
+                logger.info(f"[STOP_TRADE] ✅ Position {position_id} closed successfully")
+                
+                # Send confirmation message with link to confirmation page
+                confirmation_url = f"{MINI_APP_URL}/trade-closed?positionId={position_id}"
+                
+                confirmation_message = (
+                    f"✅ *Trade Closed Successfully*\n\n"
+                    f"Position `{position_id}` has been closed.\n\n"
+                    f"Tap below to view details."
+                )
+                
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton(
+                        text="📱 View Confirmation",
+                        web_app={"url": confirmation_url}
+                    )]
+                ])
+                
+                await query.edit_message_text(
+                    text=confirmation_message,
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                error_msg = response.text[:200]
+                logger.error(f"[STOP_TRADE] ❌ Failed to close position: {error_msg}")
+                await query.edit_message_text(
+                    text=f"❌ Failed to close trade. Error: {error_msg}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        else:
+            logger.warning("[STOP_TRADE] ⚠️ Pear API not configured")
+            await query.edit_message_text(
+                text="❌ Trading API not configured. Please contact support.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            
+    except requests.exceptions.Timeout:
+        logger.error(f"[STOP_TRADE] ⏱️ Request timeout")
+        await query.edit_message_text(
+            text="❌ Request timed out. Please try again.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.error(f"[STOP_TRADE] ❌ Error: {e}")
+        await query.edit_message_text(
+            text=f"❌ Error closing trade: {str(e)}",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     """Initialize database, Telegram bot, and background workers"""
@@ -286,6 +362,7 @@ async def on_startup() -> None:
             logger.info("[STARTUP] Initializing Telegram bot...")
             telegram_app = Application.builder().token(bot_token).build()
             telegram_app.add_handler(CommandHandler("start", handle_start))
+            telegram_app.add_handler(CallbackQueryHandler(handle_stop_trade_callback, pattern="^stop_trade:"))
             await telegram_app.initialize()
             await telegram_app.start()
             
@@ -321,6 +398,26 @@ async def on_startup() -> None:
         logger.info("[STARTUP] ✅ Notification worker started")
     except Exception as exc:
         logger.error(f"[STARTUP] ❌ Failed to start scheduler: {exc}")
+    
+    # Start Pear Agent Monitor (listens for @agentpear signals)
+    if settings.telegram_api_id and settings.telegram_api_hash and settings.telegram_phone:
+        try:
+            logger.info("[STARTUP] Starting Pear Agent Monitor...")
+            monitor_started = await start_pear_monitor(
+                api_id=settings.telegram_api_id,
+                api_hash=settings.telegram_api_hash,
+                phone=settings.telegram_phone,
+                source_channel=settings.telegram_source_channel
+            )
+            if monitor_started:
+                logger.info("[STARTUP] ✅ Pear Agent Monitor started")
+            else:
+                logger.warning("[STARTUP] ⚠️ Pear Agent Monitor failed to start")
+        except Exception as exc:
+            logger.error(f"[STARTUP] ❌ Failed to start Pear Monitor: {exc}")
+    else:
+        logger.warning("[STARTUP] ⚠️ Telegram API credentials not configured, Pear Monitor not started")
+        logger.info("[STARTUP] ℹ️ Set TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE to enable")
     
     logger.info("[STARTUP] ========== BACKEND READY ==========")
 
@@ -453,13 +550,12 @@ async def generate_trade(
     logger.info(f"[TRADE] Trade ID: {trade_id}")
     logger.info(f"[TRADE] Pear Agent API: {'✅ ENABLED' if settings.use_pear_agent_api else '❌ DISABLED'}")
     logger.info(f"[TRADE] Pear API Key: {'✅ SET' if settings.pear_agent_api_key else '❌ MISSING'}")
-    logger.info(f"[TRADE] LLLM Available: {LLLM_AVAILABLE}")
     
     # Check rate limit cache
     now = time.time()
-    if user_id in _llm_cache:
-        cached_time, cached_trade = _llm_cache[user_id]
-        remaining = int(LLM_CACHE_TTL - (now - cached_time))
+    if user_id in _signal_cache:
+        cached_time, cached_trade = _signal_cache[user_id]
+        remaining = int(SIGNAL_CACHE_TTL - (now - cached_time))
         if remaining > 0:
             logger.info(f"[TRADE] ⏱️ Rate limit active - using cached signal")
             logger.info(f"[TRADE] Wait {remaining}s for new signal")
@@ -574,136 +670,15 @@ async def generate_trade(
         if not settings.use_pear_agent_api:
             logger.info(f"[TRADE] ℹ️ Pear Agent API disabled in config")
     
-    # FALLBACK 2: Try LLLM SignalGenerator (disabled - using Pear signals only)
-    if False and signal_data is None and settings.pear_agent_fallback_to_llm and LLLM_AVAILABLE:
-        try:
-            logger.info(f"")
-            logger.info(f"[LLM] 🧠 LLLM SIGNAL GENERATOR")
-            logger.info(f"[LLM] {'-'*40}")
-            
-            # Initialize SignalGenerator (use_mock=False forces real LLM)
-            signal_gen = SignalGenerator(use_live_data=False, use_mock=False)
-            logger.info(f"[LLM] SignalGenerator initialized (use_live_data=False, use_mock=False)")
-            
-            # Generate signal
-            logger.info(f"[LLM] 🤖 Calling GPT-4o-mini via LLLM...")
-            signal_data = signal_gen.generate_signal()
-            
-            # Log the full signal
-            logger.info(f"")
-            logger.info(f"[LLM] 📈 SIGNAL RECEIVED")
-            logger.info(f"[LLM] {'-'*40}")
-            logger.info(f"[LLM] Trade Type: {signal_data.get('trade_type', 'N/A')}")
-            logger.info(f"[LLM] Basket Category: {signal_data.get('basket_category', 'N/A')}")
-            logger.info(f"[LLM] Confidence: {signal_data.get('confidence', 0)}/10")
-            logger.info(f"[LLM] Meets Threshold: {signal_data.get('meets_threshold', False)}")
-            
-            # Log baskets
-            long_basket = signal_data.get("long_basket", [])
-            short_basket = signal_data.get("short_basket", [])
-            
-            logger.info(f"")
-            logger.info(f"[LLM] 📗 LONG BASKET ({len(long_basket)} assets):")
-            for i, asset in enumerate(long_basket):
-                logger.info(f"[LLM]   {i+1}. {asset.get('coin', '?')} - weight: {asset.get('weight', 0):.1%}")
-            
-            logger.info(f"")
-            logger.info(f"[LLM] 📕 SHORT BASKET ({len(short_basket)} assets):")
-            for i, asset in enumerate(short_basket):
-                logger.info(f"[LLM]   {i+1}. {asset.get('coin', '?')} - weight: {asset.get('weight', 0):.1%}")
-            
-            # Log position sizing
-            pos_sizing = signal_data.get("position_sizing", {})
-            logger.info(f"")
-            logger.info(f"[LLM] 💰 POSITION SIZING:")
-            logger.info(f"[LLM]   Stop Loss: {pos_sizing.get('recommended_sl_percent', 5)}%")
-            logger.info(f"[LLM]   Take Profit: {pos_sizing.get('recommended_tp_percent', 15)}%")
-            logger.info(f"[LLM]   Risk/Reward: {pos_sizing.get('risk_reward_ratio', 0):.1f}")
-            
-            # Log factor analysis
-            factor_analysis = signal_data.get("factor_analysis", {})
-            if factor_analysis:
-                logger.info(f"")
-                logger.info(f"[LLM] 📊 FACTOR ANALYSIS:")
-                for factor, score in factor_analysis.items():
-                    logger.info(f"[LLM]   {factor}: {score}/10")
-            
-            # Log thesis
-            thesis = signal_data.get("thesis", "")
-            logger.info(f"")
-            logger.info(f"[LLM] 📝 THESIS:")
-            logger.info(f"[LLM]   {thesis[:200]}{'...' if len(thesis) > 200 else ''}")
-            
-            basket_category = signal_data.get("basket_category")
-            confidence = signal_data.get("confidence")
-            
-        except Exception as e:
-            logger.error(f"[LLM] ❌ LLLM SignalGenerator error: {e}")
-            import traceback
-            logger.error(f"[LLM] Traceback: {traceback.format_exc()}")
-            signal_data = None
-    
-    # FALLBACK 2: Direct OpenAI if LLLM failed
-    if signal_data is None and settings.pear_agent_fallback_to_llm and settings.openai_api_key:
-        logger.info(f"[LLM] 🔄 Fallback: Direct OpenAI call")
-        try:
-            client = OpenAI(api_key=settings.openai_api_key)
-            
-            signal_prompt = """You are a crypto basket pair trading signal generator for Hyperliquid DEX.
-
-AVAILABLE ASSETS (ONLY THESE 7 WORK): BTC, ETH, SOL, ARB, OP, DOGE, MATIC
-
-Generate a BASKET PAIR TRADE signal in this exact JSON format:
-{
-    "trade_type": "BASKET",
-    "basket_category": "LAYER1_VS_LAYER2",
-    "long_basket": [{"coin": "BTC", "weight": 0.5}, {"coin": "ETH", "weight": 0.5}],
-    "short_basket": [{"coin": "ARB", "weight": 0.5}, {"coin": "OP", "weight": 0.5}],
-    "confidence": 7,
-    "thesis": "Brief explanation of the trade thesis",
-    "position_sizing": {
-        "recommended_sl_percent": 5,
-        "recommended_tp_percent": 15
-    }
-}
-
-Return ONLY valid JSON."""
-
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are a professional crypto basket trader."},
-                    {"role": "user", "content": signal_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=500,
-                response_format={"type": "json_object"}
-            )
-            
-            signal_text = response.choices[0].message.content.strip()
-            signal_data = json.loads(signal_text)
-            long_basket = signal_data.get("long_basket", [])
-            short_basket = signal_data.get("short_basket", [])
-            basket_category = signal_data.get("basket_category")
-            confidence = signal_data.get("confidence")
-            
-            logger.info(f"[LLM] ✅ Fallback OpenAI response received")
-            logger.info(f"[LLM] Long basket: {long_basket}")
-            logger.info(f"[LLM] Short basket: {short_basket}")
-            
-        except Exception as e:
-            logger.error(f"[LLM] ❌ Fallback OpenAI error: {e}")
-            signal_data = None
-    
-    # If all LLM attempts failed, raise error - NO MOCK DATA
+    # If no Agent Pear signal available, return error
     if signal_data is None or not long_basket or not short_basket:
-        logger.error(f"[LLM] ❌ All LLM generation attempts failed")
-        logger.error(f"[LLM] signal_data: {signal_data}")
-        logger.error(f"[LLM] long_basket: {long_basket}")
-        logger.error(f"[LLM] short_basket: {short_basket}")
+        logger.error(f"[TRADE] ❌ No Agent Pear signal available")
+        logger.error(f"[TRADE] signal_data: {signal_data}")
+        logger.error(f"[TRADE] long_basket: {long_basket}")
+        logger.error(f"[TRADE] short_basket: {short_basket}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="LLM trade generation failed. Please check OpenAI API key configuration."
+            detail="No Agent Pear signal available. Please wait for a new signal from @agentpear."
         )
     
     # Calculate notionals for baskets
@@ -717,14 +692,14 @@ Return ONLY valid JSON."""
         asset["notional"] = round(BASE_NOTIONAL_PER_SIDE * asset.get("weight", 1.0), 2)
     
     logger.info(f"")
-    logger.info(f"[LLM] 💵 NOTIONAL ALLOCATION:")
-    logger.info(f"[LLM]   Base per side: ${BASE_NOTIONAL_PER_SIDE}")
+    logger.info(f"[TRADE] 💵 NOTIONAL ALLOCATION:")
+    logger.info(f"[TRADE]   Base per side: ${BASE_NOTIONAL_PER_SIDE}")
     for asset in long_basket:
-        logger.info(f"[LLM]   LONG {asset['coin']}: ${asset['notional']}")
+        logger.info(f"[TRADE]   LONG {asset['coin']}: ${asset['notional']}")
     for asset in short_basket:
-        logger.info(f"[LLM]   SHORT {asset['coin']}: ${asset['notional']}")
+        logger.info(f"[TRADE]   SHORT {asset['coin']}: ${asset['notional']}")
     
-    # Use LLM's recommended TP/SL values
+    # Use Agent Pear's recommended TP/SL values
     pos_sizing = signal_data.get("position_sizing", {})
     sl_pct = pos_sizing.get("recommended_sl_percent", 10.0)  # Default 10% if not provided
     tp_pct = pos_sizing.get("recommended_tp_percent", 20.0)  # Default 20% if not provided
@@ -733,7 +708,7 @@ Return ONLY valid JSON."""
     sl_pct = max(3.0, min(15.0, float(sl_pct)))
     tp_pct = max(5.0, min(30.0, float(tp_pct)))
     
-    logger.info(f"[LLM] 📊 LLM recommended: TP={tp_pct}%, SL={sl_pct}%")
+    logger.info(f"[TRADE] 📊 Agent Pear recommended: TP={tp_pct}%, SL={sl_pct}%")
     
     # Use primary asset from each basket for the main pair
     # (For compatibility with existing Trade model)
@@ -750,15 +725,15 @@ Return ONLY valid JSON."""
     reasoning = signal_data.get("thesis", "AI-generated basket pair trade")
     
     logger.info(f"")
-    logger.info(f"[LLM] 📋 TRADE SUMMARY")
-    logger.info(f"[LLM] {'-'*40}")
-    logger.info(f"[LLM] Primary Long: {long_symbol}")
-    logger.info(f"[LLM] Primary Short: {short_symbol}")
-    logger.info(f"[LLM] Total Long Notional: ${long_notional}")
-    logger.info(f"[LLM] Total Short Notional: ${short_notional}")
-    logger.info(f"[LLM] Leverage: {leverage}x")
-    logger.info(f"[LLM] Take Profit: {take_profit_ratio*100:.1f}%")
-    logger.info(f"[LLM] Stop Loss: {stop_loss_ratio*100:.1f}%")
+    logger.info(f"[TRADE] 📋 TRADE SUMMARY")
+    logger.info(f"[TRADE] {'-'*40}")
+    logger.info(f"[TRADE] Primary Long: {long_symbol}")
+    logger.info(f"[TRADE] Primary Short: {short_symbol}")
+    logger.info(f"[TRADE] Total Long Notional: ${long_notional}")
+    logger.info(f"[TRADE] Total Short Notional: ${short_notional}")
+    logger.info(f"[TRADE] Leverage: {leverage}x")
+    logger.info(f"[TRADE] Take Profit: {take_profit_ratio*100:.1f}%")
+    logger.info(f"[TRADE] Stop Loss: {stop_loss_ratio*100:.1f}%")
     
     # Save trade to DB with full basket data
     trade = Trade(
@@ -786,13 +761,13 @@ Return ONLY valid JSON."""
     session.commit()
     
     logger.info(f"")
-    logger.info(f"[LLM] 💾 TRADE SAVED")
-    logger.info(f"[LLM] Trade ID: {trade_id}")
-    logger.info(f"[LLM] Status: PENDING")
+    logger.info(f"[TRADE] 💾 TRADE SAVED")
+    logger.info(f"[TRADE] Trade ID: {trade_id}")
+    logger.info(f"[TRADE] Status: PENDING")
     
     # Cache the response
     result = trade_to_response(trade)
-    _llm_cache[user_id] = (now, {
+    _signal_cache[user_id] = (now, {
         "pair": {
             "long": {"symbol": long_symbol, "notional": long_notional, "leverage": leverage},
             "short": {"symbol": short_symbol, "notional": short_notional, "leverage": leverage},
@@ -808,7 +783,7 @@ Return ONLY valid JSON."""
     })
     
     logger.info(f"")
-    logger.info(f"[LLM] ✅ TRADE GENERATION COMPLETE")
+    logger.info(f"[TRADE] ✅ TRADE GENERATION COMPLETE")
     logger.info(f"{'='*60}")
     return result
 
@@ -818,6 +793,7 @@ async def broadcast_pear_signal(signal_data: Dict[str, Any]) -> Any:
     """
     Broadcast a new Pear signal to all users via Telegram bot.
     Called by pear_monitor.py when new signals arrive from @agentpear.
+    Sends trade message in same format as before with Review & Confirm button.
     """
     logger.info(f"")
     logger.info(f"{'='*60}")
@@ -831,64 +807,113 @@ async def broadcast_pear_signal(signal_data: Dict[str, Any]) -> Any:
         logger.warning("[BROADCAST] ⚠️ Invalid signal - missing baskets")
         return {"success": False, "error": "Invalid signal format"}
     
+    # Extract signal data
     long_asset = long_basket[0].get("coin", "?")
     short_asset = short_basket[0].get("coin", "?")
     confidence = signal_data.get("confidence", 0)
     factor_analysis = signal_data.get("factor_analysis", {})
     thesis = signal_data.get("thesis", "")
+    pos_sizing = signal_data.get("position_sizing", {})
     
-    logger.info(f"[BROADCAST] Pair: {long_asset}/{short_asset}")
-    logger.info(f"[BROADCAST] Confidence: {confidence}/10")
-    logger.info(f"[BROADCAST] Z-Score: {factor_analysis.get('z_score', 'N/A')}")
+    # Get TP/SL from signal
+    tp_pct = pos_sizing.get("recommended_tp_percent", 15.0)
+    sl_pct = pos_sizing.get("recommended_sl_percent", 8.0)
     
-    # Format message for Telegram
+    # Clamp to valid range
+    tp_pct = max(5.0, min(30.0, float(tp_pct)))
+    sl_pct = max(3.0, min(15.0, float(sl_pct)))
+    
     z_score = factor_analysis.get('z_score', 0)
     correlation = factor_analysis.get('correlation', 0)
     
-    message = (
-        f"🍐 *Agent Pear Signal*\n\n"
-        f"📊 *Pair:* {long_asset}/{short_asset}\n"
-        f"📈 *Z-Score:* {z_score}\n"
-        f"🔗 *Correlation:* {correlation:.2f}\n"
-        f"⭐ *Confidence:* {confidence}/10\n\n"
-        f"💡 _{thesis[:200]}_\n\n"
-        f"Tap /start to generate a trade from this signal!"
-    )
+    logger.info(f"[BROADCAST] Pair: {long_asset}/{short_asset}")
+    logger.info(f"[BROADCAST] Confidence: {confidence}/10")
+    logger.info(f"[BROADCAST] Z-Score: {z_score}")
+    logger.info(f"[BROADCAST] TP: {tp_pct}%, SL: {sl_pct}%")
     
-    # Send to all users who have interacted with the bot
-    # For now, log the message - in production, iterate over subscribers
-    logger.info(f"[BROADCAST] Message prepared for broadcast")
-    logger.info(f"[BROADCAST] {message[:100]}...")
+    # Calculate notionals
+    BASE_NOTIONAL = 10.0
+    for asset in long_basket:
+        asset["notional"] = round(BASE_NOTIONAL * asset.get("weight", 1.0), 2)
+    for asset in short_basket:
+        asset["notional"] = round(BASE_NOTIONAL * asset.get("weight", 1.0), 2)
+    
+    long_notional = sum(a.get("notional", 0) for a in long_basket)
+    short_notional = sum(a.get("notional", 0) for a in short_basket)
     
     # If telegram_app is available, broadcast to known users
-    if telegram_app and telegram_app.bot:
-        try:
-            # Get notification settings to find users
-            with Session(engine) as session:
-                from sqlmodel import select
-                settings_list = session.exec(select(NotificationSetting)).all()
-                
-                sent_count = 0
-                for setting in settings_list:
-                    try:
-                        await telegram_app.bot.send_message(
-                            chat_id=setting.chat_id,
-                            text=message,
-                            parse_mode=ParseMode.MARKDOWN
-                        )
-                        sent_count += 1
-                        logger.info(f"[BROADCAST] ✅ Sent to chat {setting.chat_id}")
-                    except Exception as e:
-                        logger.error(f"[BROADCAST] ❌ Failed to send to {setting.chat_id}: {e}")
-                
-                logger.info(f"[BROADCAST] 📤 Broadcast complete: {sent_count} users notified")
-                return {"success": True, "sent_count": sent_count}
-        except Exception as e:
-            logger.error(f"[BROADCAST] ❌ Broadcast error: {e}")
-            return {"success": False, "error": str(e)}
-    else:
+    if not telegram_app or not telegram_app.bot:
         logger.warning("[BROADCAST] ⚠️ Telegram bot not available")
         return {"success": False, "error": "Telegram bot not initialized"}
+    
+    try:
+        with Session(engine) as session:
+            settings_list = session.exec(select(NotificationSetting)).all()
+            
+            sent_count = 0
+            for setting in settings_list:
+                try:
+                    # Create a trade for this user
+                    trade_id = new_trade_id()
+                    
+                    trade = Trade(
+                        trade_id=trade_id,
+                        user_id=setting.user_id,
+                        pair_long_symbol=f"{long_asset}-PERP",
+                        pair_long_notional=long_notional,
+                        pair_long_leverage=2,
+                        pair_short_symbol=f"{short_asset}-PERP",
+                        pair_short_notional=short_notional,
+                        pair_short_leverage=2,
+                        take_profit_ratio=tp_pct / 100,
+                        stop_loss_ratio=-sl_pct / 100,
+                        reasoning=thesis,
+                        status="PENDING",
+                        expires_at=default_expiry(),
+                        long_basket_json=json.dumps(long_basket),
+                        short_basket_json=json.dumps(short_basket),
+                        basket_category=signal_data.get("basket_category", "AGENTPEAR_SIGNAL"),
+                        confidence=confidence,
+                        factor_analysis_json=json.dumps(factor_analysis) if factor_analysis else None,
+                    )
+                    session.add(trade)
+                    session.commit()
+                    
+                    # Build trade data for message formatting
+                    trade_data = {
+                        "tradeId": trade_id,
+                        "pair": {
+                            "long": {"symbol": f"{long_asset}-PERP", "notional": long_notional, "leverage": 2},
+                            "short": {"symbol": f"{short_asset}-PERP", "notional": short_notional, "leverage": 2},
+                        },
+                        "takeProfitRatio": tp_pct / 100,
+                        "stopLossRatio": -sl_pct / 100,
+                        "reasoning": thesis,
+                        "longBasket": long_basket,
+                        "shortBasket": short_basket,
+                        "basketCategory": signal_data.get("basket_category", "AGENTPEAR_SIGNAL"),
+                        "confidence": confidence,
+                    }
+                    
+                    # Format message using existing function
+                    message, keyboard = format_trade_message(trade_data)
+                    
+                    await telegram_app.bot.send_message(
+                        chat_id=setting.chat_id,
+                        text=message,
+                        reply_markup=keyboard,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    sent_count += 1
+                    logger.info(f"[BROADCAST] ✅ Sent trade {trade_id} to chat {setting.chat_id}")
+                except Exception as e:
+                    logger.error(f"[BROADCAST] ❌ Failed to send to {setting.chat_id}: {e}")
+            
+            logger.info(f"[BROADCAST] 📤 Broadcast complete: {sent_count} users notified")
+            return {"success": True, "sent_count": sent_count}
+    except Exception as e:
+        logger.error(f"[BROADCAST] ❌ Broadcast error: {e}")
+        return {"success": False, "error": str(e)}
 
 
 @app.post("/api/trades/parse-message", response_model=TradeSchema)
@@ -1395,6 +1420,15 @@ async def on_shutdown() -> None:
     """Cleanup on shutdown"""
     global telegram_app
     logger.info("[SHUTDOWN] Shutting down...")
+    
+    # Stop Pear Agent Monitor
+    try:
+        logger.info("[SHUTDOWN] Stopping Pear Agent Monitor...")
+        await stop_pear_monitor()
+        logger.info("[SHUTDOWN] ✅ Pear Monitor stopped")
+    except Exception as e:
+        logger.error(f"[SHUTDOWN] ❌ Error stopping Pear Monitor: {e}")
+    
     if telegram_app:
         logger.info("[SHUTDOWN] Removing webhook and stopping bot...")
         await telegram_app.bot.delete_webhook()
@@ -1454,7 +1488,8 @@ def build_notification_message(
     positions_data: Dict[str, Any], timestamp: datetime, mini_app_url: str
 ) -> Dict[str, Any]:
     """
-    Build notification message from Pear Protocol positions data.
+    Build detailed notification message from Pear Protocol positions data.
+    Shows all open trades with individual stop buttons for each trade.
     
     Args:
         positions_data: Parsed positions from parse_positions_for_notification()
@@ -1471,13 +1506,19 @@ def build_notification_message(
     pnl_emoji = "📈" if total_pnl >= 0 else "📉"
     pnl_color = "🟢" if total_pnl >= 0 else "🔴"
     
-    lines: List[str] = []
-    for pos in positions:
+    # Build detailed position info
+    position_blocks: List[str] = []
+    keyboard_rows: List[List[Dict]] = []
+    
+    for i, pos in enumerate(positions):
         long_asset = pos.get("long_asset", "")
         short_asset = pos.get("short_asset", "")
         pnl = pos.get("pnl", 0)
         pnl_pct = pos.get("pnl_pct", 0)
         leverage = pos.get("leverage", 1)
+        notional = pos.get("notional", 0)
+        position_id = pos.get("position_id", f"pos_{i}")
+        entry_price = pos.get("entry_price", 0)
         
         # Format pair name
         if short_asset:
@@ -1488,37 +1529,52 @@ def build_notification_message(
         # Position PnL emoji
         pos_emoji = "🟢" if pnl >= 0 else "🔴"
         
-        lines.append(
-            f"{pos_emoji} {pair_name} | {leverage}x | {pnl_pct:+.1f}% (${pnl:+.2f})"
+        # Build detailed position block
+        position_block = (
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{pos_emoji} *{pair_name}*\n"
+            f"📊 Leverage: {leverage}x | Size: ${notional:.2f}\n"
+            f"💰 P/L: {pnl_pct:+.2f}% (${pnl:+.2f})"
         )
+        position_blocks.append(position_block)
+        
+        # Add stop button for this specific trade
+        keyboard_rows.append([
+            {
+                "text": f"🛑 Stop {pair_name}",
+                "callback_data": f"stop_trade:{position_id}"
+            }
+        ])
 
     if not has_positions:
         body = "💭 No open positions. Account idle."
+        # Just show View Trades button when no positions
+        keyboard_rows = []
     else:
-        body = "\n".join(lines)
+        body = "\n".join(position_blocks)
 
-    header = f"{pnl_emoji} Portfolio Update — {timestamp.strftime('%Y-%m-%d %H:%M UTC')}"
+    header = f"{pnl_emoji} *Portfolio Update* — {timestamp.strftime('%Y-%m-%d %H:%M UTC')}"
     overview = (
-        f"💰 Position Value: ${total_notional:,.2f}\n"
-        f"📊 Open Positions: {len(positions)}\n"
-        f"{pnl_color} P/L: {total_pnl_pct:+.2f}% (${total_pnl:+,.2f})"
+        f"💰 *Total Value:* ${total_notional:,.2f}\n"
+        f"📊 *Open Positions:* {len(positions)}\n"
+        f"{pnl_color} *Total P/L:* {total_pnl_pct:+.2f}% (${total_pnl:+,.2f})"
     )
 
-    message = f"{header}\n\n{overview}\n\n{body}\n\nTap below for details."
+    message = f"{header}\n\n{overview}\n\n{body}"
     
-    # Link directly to trades page (home) instead of root
+    if has_positions:
+        message += "\n\n━━━━━━━━━━━━━━━━━━━━\nTap a button below to stop a specific trade."
+    
+    # Add View All Trades button at the bottom
     trades_url = f"{mini_app_url}/trades"
+    keyboard_rows.append([
+        {
+            "text": "📱 View All Trades",
+            "web_app": {"url": trades_url},
+        }
+    ])
     
-    keyboard = {
-        "inline_keyboard": [
-            [
-                {
-                    "text": "📱 View Trades",
-                    "web_app": {"url": trades_url},
-                }
-            ]
-        ]
-    }
+    keyboard = {"inline_keyboard": keyboard_rows}
 
     return {"text": message, "reply_markup": keyboard}
 

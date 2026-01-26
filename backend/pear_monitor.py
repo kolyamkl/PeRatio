@@ -1,24 +1,21 @@
-"""Pear Agent Monitor - Monitors @agentpear and integrates with trading system"""
+"""
+Pear Agent Monitor - Monitors @agentpear and integrates with trading system.
+
+This module can be run standalone or imported and started as a background task
+from the main FastAPI backend.
+"""
 from telethon import TelegramClient, events
 import asyncio
 import re
 import json
 import os
 import httpx
+import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
-# Telegram API credentials from environment
-API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
-API_HASH = os.getenv("TELEGRAM_API_HASH", "")
-PHONE = os.getenv("TELEGRAM_PHONE", "")
-
-# Channel to monitor
-SOURCE_CHANNEL = os.getenv("TELEGRAM_SOURCE_CHANNEL", "@agentpear")
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # File to store latest signal for main.py to read
 LATEST_SIGNAL_FILE = os.path.join(os.path.dirname(__file__), "latest_pear_signal.json")
@@ -27,8 +24,9 @@ SIGNALS_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "pear_signals_his
 # Backend URL for triggering trades
 BACKEND_URL = "http://localhost:8000"
 
-# Create client
-client = TelegramClient('pear_monitor', API_ID, API_HASH)
+# Global client instance (initialized when start_monitor is called)
+_monitor_client: Optional[TelegramClient] = None
+_monitor_task: Optional[asyncio.Task] = None
 
 def parse_signal_from_text(text: str) -> Optional[Dict[str, Any]]:
     """Parse trading signal from @agentpear message text"""
@@ -140,37 +138,37 @@ def save_signal(signal_data: Dict[str, Any]):
     with open(SIGNALS_HISTORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(history, f, indent=2, ensure_ascii=False)
 
-@client.on(events.NewMessage(chats=SOURCE_CHANNEL))
-async def handler(event):
+async def handle_new_message(event, source_channel: str):
     """Handle new messages from @agentpear"""
     try:
         text = event.message.text
         if not text:
             return
         
-        print(f"\n{'='*60}")
-        print(f"🍐 NEW MESSAGE FROM @agentpear")
-        print(f"{'='*60}")
-        print(f"{text[:200]}..." if len(text) > 200 else text)
+        logger.info(f"")
+        logger.info(f"{'='*60}")
+        logger.info(f"[PEAR_MONITOR] 🍐 NEW MESSAGE FROM {source_channel}")
+        logger.info(f"{'='*60}")
+        logger.info(f"[PEAR_MONITOR] {text[:200]}..." if len(text) > 200 else f"[PEAR_MONITOR] {text}")
         
         # Parse signal
         signal = parse_signal_from_text(text)
         
         if signal:
-            print(f"\n✅ SIGNAL DETECTED!")
-            print(f"   Long:  {signal['long_asset']}")
-            print(f"   Short: {signal['short_asset']}")
+            logger.info(f"[PEAR_MONITOR] ✅ SIGNAL DETECTED!")
+            logger.info(f"[PEAR_MONITOR]    Long:  {signal['long_asset']}")
+            logger.info(f"[PEAR_MONITOR]    Short: {signal['short_asset']}")
             if 'z_score' in signal:
-                print(f"   Z-Score: {signal['z_score']}")
+                logger.info(f"[PEAR_MONITOR]    Z-Score: {signal['z_score']}")
             if 'correlation' in signal:
-                print(f"   Correlation: {signal['correlation']}")
+                logger.info(f"[PEAR_MONITOR]    Correlation: {signal['correlation']}")
             
             # Convert to trade format
             trade_signal = convert_to_trade_format(signal, text)
             
             # Save for main.py
             save_signal(trade_signal)
-            print(f"\n💾 Signal saved to {LATEST_SIGNAL_FILE}")
+            logger.info(f"[PEAR_MONITOR] 💾 Signal saved to {LATEST_SIGNAL_FILE}")
             
             # Trigger trade generation endpoint
             try:
@@ -180,35 +178,128 @@ async def handler(event):
                         json=trade_signal
                     )
                     if resp.status_code == 200:
-                        print(f"📤 Signal broadcasted to users!")
+                        result = resp.json()
+                        logger.info(f"[PEAR_MONITOR] 📤 Signal broadcasted to {result.get('sent_count', 0)} users!")
                     else:
-                        print(f"⚠️ Broadcast endpoint returned: {resp.status_code}")
+                        logger.warning(f"[PEAR_MONITOR] ⚠️ Broadcast endpoint returned: {resp.status_code}")
             except Exception as e:
-                print(f"⚠️ Could not broadcast (backend may not have endpoint yet): {e}")
+                logger.warning(f"[PEAR_MONITOR] ⚠️ Could not broadcast: {e}")
         else:
-            print(f"\n⏭️ No trading signal found in message")
+            logger.info(f"[PEAR_MONITOR] ⏭️ No trading signal found in message")
         
-        print(f"{'='*60}\n")
+        logger.info(f"{'='*60}")
         
     except Exception as e:
-        print(f"❌ Error processing message: {e}")
+        logger.error(f"[PEAR_MONITOR] ❌ Error processing message: {e}")
 
-async def main():
-    """Start the monitor"""
-    await client.start(phone=PHONE)
-    
-    me = await client.get_me()
-    print(f"\n{'='*60}")
-    print(f"🍐 AGENTPEAR MONITOR - INTEGRATED MODE")
-    print(f"{'='*60}")
-    print(f"\n👤 Logged in as: {me.first_name}")
-    print(f"👀 Monitoring: {SOURCE_CHANNEL}")
-    print(f"� Saving signals to: {LATEST_SIGNAL_FILE}")
-    print(f"� Backend: {BACKEND_URL}")
-    print(f"\n⏳ Waiting for signals...")
-    print(f"{'='*60}\n")
-    
-    await client.run_until_disconnected()
 
+async def start_monitor(api_id: int, api_hash: str, phone: str, source_channel: str = "@agentpear") -> bool:
+    """
+    Start the Pear Agent monitor as a background task.
+    
+    Args:
+        api_id: Telegram API ID
+        api_hash: Telegram API hash
+        phone: Phone number for authentication
+        source_channel: Channel to monitor (default: @agentpear)
+    
+    Returns:
+        True if started successfully, False otherwise
+    """
+    global _monitor_client, _monitor_task
+    
+    if not api_id or not api_hash or not phone:
+        logger.warning("[PEAR_MONITOR] ⚠️ Missing Telegram API credentials, monitor not started")
+        return False
+    
+    try:
+        logger.info(f"[PEAR_MONITOR] 🍐 Starting Agent Pear monitor...")
+        logger.info(f"[PEAR_MONITOR] Channel: {source_channel}")
+        
+        # Create client with session file in backend directory
+        session_path = os.path.join(os.path.dirname(__file__), 'pear_monitor_session')
+        _monitor_client = TelegramClient(session_path, api_id, api_hash)
+        
+        # Register message handler
+        @_monitor_client.on(events.NewMessage(chats=source_channel))
+        async def message_handler(event):
+            await handle_new_message(event, source_channel)
+        
+        # Start the client
+        await _monitor_client.start(phone=phone)
+        
+        me = await _monitor_client.get_me()
+        logger.info(f"[PEAR_MONITOR] ✅ Monitor started - logged in as: {me.first_name}")
+        logger.info(f"[PEAR_MONITOR] 👀 Monitoring: {source_channel}")
+        
+        # Run in background (don't block)
+        _monitor_task = asyncio.create_task(_run_monitor())
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"[PEAR_MONITOR] ❌ Failed to start monitor: {e}")
+        return False
+
+
+async def _run_monitor():
+    """Internal function to keep the monitor running"""
+    global _monitor_client
+    try:
+        if _monitor_client:
+            await _monitor_client.run_until_disconnected()
+    except asyncio.CancelledError:
+        logger.info("[PEAR_MONITOR] Monitor task cancelled")
+    except Exception as e:
+        logger.error(f"[PEAR_MONITOR] Monitor error: {e}")
+
+
+async def stop_monitor():
+    """Stop the Pear Agent monitor"""
+    global _monitor_client, _monitor_task
+    
+    if _monitor_task:
+        _monitor_task.cancel()
+        try:
+            await _monitor_task
+        except asyncio.CancelledError:
+            pass
+        _monitor_task = None
+    
+    if _monitor_client:
+        await _monitor_client.disconnect()
+        _monitor_client = None
+    
+    logger.info("[PEAR_MONITOR] ✅ Monitor stopped")
+
+
+def is_monitor_running() -> bool:
+    """Check if the monitor is currently running"""
+    return _monitor_client is not None and _monitor_client.is_connected()
+
+
+# Standalone execution
 if __name__ == '__main__':
-    asyncio.run(main())
+    from dotenv import load_dotenv
+    load_dotenv()
+    
+    API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
+    API_HASH = os.getenv("TELEGRAM_API_HASH", "")
+    PHONE = os.getenv("TELEGRAM_PHONE", "")
+    SOURCE_CHANNEL = os.getenv("TELEGRAM_SOURCE_CHANNEL", "@agentpear")
+    
+    async def main():
+        success = await start_monitor(API_ID, API_HASH, PHONE, SOURCE_CHANNEL)
+        if success:
+            print(f"\n🍐 AGENTPEAR MONITOR RUNNING")
+            print(f"Press Ctrl+C to stop\n")
+            # Keep running
+            while is_monitor_running():
+                await asyncio.sleep(1)
+        else:
+            print("❌ Failed to start monitor")
+    
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n👋 Monitor stopped by user")

@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     pear_agent_api_key: str = ""  # API key for Pear Agent signals
     use_pear_agent_api: bool = True  # Toggle to use Pear Agent API for signals
     pear_agent_fallback_to_llm: bool = True  # Fallback to LLM if Pear API fails
+    
+    # Telegram API credentials for Pear Monitor (Telethon client)
+    telegram_api_id: int = 0
+    telegram_api_hash: str = ""
+    telegram_phone: str = ""
+    telegram_source_channel: str = "@agentpear"
 
     def get_cors_list(self) -> List[str]:
         """Parse CORS origins from string"""
