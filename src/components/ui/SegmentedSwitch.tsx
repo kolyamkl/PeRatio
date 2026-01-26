@@ -1,13 +1,25 @@
 import { hapticFeedback } from '../../lib/telegram'
 
+interface SegmentedOption {
+  value: string
+  label: string
+  count?: number
+}
+
 interface SegmentedSwitchProps {
-  options: string[]
-  selected: string
+  options: string[] | SegmentedOption[]
+  value?: string
+  selected?: string
   onChange: (value: string) => void
 }
 
-export function SegmentedSwitch({ options, selected, onChange }: SegmentedSwitchProps) {
-  const selectedIndex = options.indexOf(selected)
+export function SegmentedSwitch({ options, value, selected, onChange }: SegmentedSwitchProps) {
+  const currentValue = value || selected || ''
+  const normalizedOptions: SegmentedOption[] = typeof options[0] === 'string' 
+    ? (options as string[]).map(o => ({ value: o, label: o }))
+    : options as SegmentedOption[]
+  
+  const selectedIndex = normalizedOptions.findIndex(o => o.value === currentValue)
   
   const handleSelect = (option: string) => {
     if (option !== selected) {
@@ -28,16 +40,19 @@ export function SegmentedSwitch({ options, selected, onChange }: SegmentedSwitch
       />
       
       {/* Options */}
-      {options.map((option) => (
+      {normalizedOptions.map((option) => (
         <button
-          key={option}
-          onClick={() => handleSelect(option)}
+          key={option.value}
+          onClick={() => handleSelect(option.value)}
           className={`
             relative flex-1 py-2.5 px-4 text-sm font-medium rounded-lg transition-colors duration-200 z-10
-            ${selected === option ? 'text-accent-primary' : 'text-text-muted'}
+            ${currentValue === option.value ? 'text-accent-primary' : 'text-text-muted'}
           `}
         >
-          {option}
+          {option.label}
+          {option.count !== undefined && (
+            <span className="ml-1.5 text-xs opacity-60">({option.count})</span>
+          )}
         </button>
       ))}
     </div>

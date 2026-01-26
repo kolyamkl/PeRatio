@@ -3,9 +3,20 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Install build dependencies for native modules
+RUN apk add --no-cache python3 make g++
+
+# Set npm timeout and registry
+ENV NPM_CONFIG_FETCH_TIMEOUT=300000 \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
+
 # Copy package files
 COPY package*.json ./
-RUN npm ci
+
+# Install dependencies with retry logic
+RUN npm ci --prefer-offline --no-audit
 
 # Copy source code
 COPY . .
@@ -15,6 +26,9 @@ RUN npm run build
 
 # Production stage with nginx
 FROM nginx:alpine
+
+# Install wget for health check
+RUN apk add --no-cache wget
 
 # Copy built assets from builder
 COPY --from=builder /app/dist /usr/share/nginx/html

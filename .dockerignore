@@ -1,45 +1,80 @@
-# Node modules
-node_modules
-npm-debug.log
+# CRITICAL: Exclude large directories first
+node_modules/
+**/node_modules/
+backend/.venv/
+backend/venv/
+.venv/
+venv/
 
 # Build outputs
-dist
-build
+dist/
+build/
+*.pyc
+__pycache__/
+**/__pycache__/
 
 # Environment files (will be passed via docker-compose)
 .env
-.env.local
-.env.*.local
+.env.*
+backend/.env
 
 # Git
-.git
+.git/
 .gitignore
+.gitattributes
 
 # IDE
-.vscode
-.idea
+.vscode/
+.idea/
 *.swp
 *.swo
+*.sublime-*
 
 # OS
 .DS_Store
 Thumbs.db
+*.bak
 
 # Logs
 *.log
-logs
+logs/
+backend/logs/
 
 # Test coverage
-coverage
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
 
 # Temporary files
-tmp
-temp
+tmp/
+temp/
 *.tmp
+*.temp
+
+# Database files
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+backend/*.db
 
 # Documentation
 *.md
 !README.md
+docs/
 
 # Scripts (not needed in container)
-scripts
+scripts/
+
+# Pear signal cache
+backend/latest_pear_signal.json
+
+# npm
+npm-debug.log
+yarn-error.log
+
+# Python
+*.egg-info/
+.eggs/
+*.egg

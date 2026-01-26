@@ -52,10 +52,10 @@ export function TradeCard({ trade, index = 0 }: TradeCardProps) {
   }, [isExpanded])
 
   // Format time ago
-  const getTimeAgo = (dateStr: string) => {
-    const date = new Date(dateStr)
+  const getTimeAgo = (date: Date | string) => {
+    const d = typeof date === 'string' ? new Date(date) : date
     const now = new Date()
-    const diffMs = now.getTime() - date.getTime()
+    const diffMs = now.getTime() - d.getTime()
     const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
     const diffDays = Math.floor(diffHours / 24)
     
@@ -133,9 +133,9 @@ export function TradeCard({ trade, index = 0 }: TradeCardProps) {
               <span className="text-text-muted">Correlation:</span>
               <span className="text-text-primary font-medium">{trade.details.correlation.toFixed(4)}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex items-center gap-2 text-xs">
               <span className="text-text-muted">Z-Score:</span>
-              <span className="text-text-primary font-medium">{trade.details.zScore.toFixed(2)}</span>
+              <span className="font-medium text-text-primary">{trade.details.zScore?.toFixed(2) || 'N/A'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-text-muted">Co-integration:</span>
@@ -227,16 +227,16 @@ export function TradeCard({ trade, index = 0 }: TradeCardProps) {
               <div className="space-y-3">
                 <StatRow label="Entry Price" value={formatCurrency(trade.details.entryPriceLong)} highlight />
                 <StatRow label="Current Price" value={formatCurrency(trade.details.currentPriceLong)} />
-                <StatRow label="Hedge Ratio" value={trade.details.hedgeRatio.toFixed(2)} />
+                <StatRow label="Hedge Ratio" value={trade.details.hedgeRatio?.toFixed(2) || 'N/A'} />
                 <StatRow label="Half Life" value={`${trade.details.halfLife} days`} />
               </div>
               
               {/* Right column */}
               <div className="space-y-3">
-                <StatRow label="Backtest Win Rate" value={`${trade.details.winRate}%`} highlight />
-                <StatRow label="Sharpe Ratio" value={trade.details.sharpeRatio.toFixed(2)} />
-                <StatRow label="Volatility" value={trade.details.volatility.toFixed(2)} />
-                <StatRow label="Timeframe" value={trade.details.timeframe} />
+                <StatRow label="Backtest Win Rate" value={trade.details.winRate ? `${trade.details.winRate}%` : 'N/A'} highlight />
+                <StatRow label="Sharpe Ratio" value={trade.details.sharpeRatio?.toFixed(2) || 'N/A'} />
+                <StatRow label="Volatility" value={trade.details.volatility?.toFixed(2) || 'N/A'} />
+                <StatRow label="Timeframe" value={trade.details.timeframe || 'N/A'} />
               </div>
             </div>
             

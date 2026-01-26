@@ -1,39 +1,63 @@
+# CRITICAL: Exclude virtual environment (147MB+)
+.venv/
+venv/
+env/
+ENV/
+
+# Exclude pear-sdk (96MB - not needed in container)
+pear-sdk/
+
 # Python
-__pycache__
+__pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-.venv
-venv
-env
-ENV
+*.pyc
 
 # Database files
 *.db
 *.db-journal
+*.sqlite
+*.sqlite3
 
 # Environment files
 .env
+.env.*
 .env.local
 
 # IDE
-.vscode
-.idea
+.vscode/
+.idea/
 *.swp
+*.swo
 
 # Logs
 *.log
-logs
+logs/
 
 # Test
-.pytest_cache
+.pytest_cache/
 .coverage
-htmlcov
+htmlcov/
+.tox/
 
 # OS
 .DS_Store
+Thumbs.db
 
 # Temporary
-tmp
+tmp/
 *.tmp
+
+# Pear signal cache
+latest_pear_signal.json
+
+# Session files
+*.session
+
+# Build artifacts
+*.egg-info/
+dist/
+build/

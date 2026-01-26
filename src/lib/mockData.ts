@@ -28,6 +28,13 @@ export interface Trade {
     cointegration: boolean
     halfLife: number
     hedgeRatio?: number
+    remarks?: string
+    winRate?: number
+    sharpeRatio?: number
+    volatility?: number
+    timeframe?: string
+    zScore?: number
+    tradingEngine?: string
   }
   openedAt: Date
   closedAt?: Date

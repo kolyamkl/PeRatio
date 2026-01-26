@@ -13,7 +13,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    bot_token: str = ""
+    bot_token: str = Field(default="", validation_alias="TELEGRAM_BOT_TOKEN")
     backend_url: str = ""
     database_url: str = "postgresql://user:password@localhost:5432/tg_trade"
     cors_origins: str = "*"

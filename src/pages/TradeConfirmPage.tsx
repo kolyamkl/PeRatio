@@ -45,7 +45,7 @@ export function TradeConfirmPage() {
     // Strip -PERP suffix if present (backend uses BTC-PERP, frontend uses BTC)
     const ticker = symbol.replace(/-PERP$/i, '')
     const found = availableCoins.find(c => c.ticker.toUpperCase() === ticker.toUpperCase())
-    return found || { name: ticker, ticker }
+    return found || { name: ticker, ticker, price: 0 }
   }
 
   const [longCoins, setLongCoins] = useState<Coin[]>([

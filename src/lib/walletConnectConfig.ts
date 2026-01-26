@@ -150,7 +150,7 @@ export function openWalletApp(walletType: WalletType, wcUri: string): void {
  * Check if wallet app is likely installed
  * Note: This is a best-effort check, not 100% reliable
  */
-export function isWalletLikelyInstalled(walletType: WalletType): boolean {
+export function isWalletLikelyInstalled(_walletType: WalletType): boolean {
   // On mobile, we can't reliably detect if an app is installed
   // This is a placeholder for future enhancement
   // You could use custom URL scheme detection or other methods

@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Production Docker Compose for AWS Deployment
 services:
   # PostgreSQL Database
@@ -36,6 +34,9 @@ services:
       PEAR_API_KEY: ${PEAR_API_KEY:-}
       PEAR_CLIENT_ID: ${PEAR_CLIENT_ID:-}
       PEAR_AGENT_WALLET: ${PEAR_AGENT_WALLET:-}
+      PEAR_AGENT_API_KEY: ${PEAR_AGENT_API_KEY:-}
+      USE_PEAR_AGENT_API: ${USE_PEAR_AGENT_API:-true}
+      PEAR_AGENT_FALLBACK_TO_LLM: ${PEAR_AGENT_FALLBACK_TO_LLM:-false}
     depends_on:
       postgres:
         condition: service_healthy

@@ -4,8 +4,6 @@ import {
   ArrowRight, 
   Inbox, 
   Search, 
-  Filter,
-  Zap,
   BarChart3,
   RefreshCw
 } from 'lucide-react'
@@ -14,12 +12,9 @@ import { SegmentedSwitch } from '../components/ui/SegmentedSwitch'
 import { TradeCard } from '../components/trade/TradeCard'
 import { PerformanceChart } from '../components/trade/PerformanceChart'
 import { ShimmerTradeCard } from '../components/ui/Shimmer'
-import { GlowPulse } from '../components/ui/GlowPulse'
 import { 
   fetchTrades, 
-  fetchPerformanceData,
   formatCurrency, 
-  formatPercent,
   type Trade as ApiTrade
 } from '../lib/api'
 import { availableCoins, type Coin } from '../lib/mockData'
@@ -50,6 +45,7 @@ interface DisplayTrade {
     cointegration: boolean
     halfLife: number
   }
+  openedAt: Date
   createdAt: Date
   expiresAt?: Date
 }
@@ -117,6 +113,7 @@ function convertApiToDisplay(apiTrade: ApiTrade): DisplayTrade {
       cointegration: true,
       halfLife: 1.2
     },
+    openedAt: new Date(apiTrade.createdAt),
     createdAt: new Date(apiTrade.createdAt),
     expiresAt: apiTrade.expiresAt ? new Date(apiTrade.expiresAt) : undefined
   }
@@ -287,6 +284,7 @@ export function TradesPage() {
         {/* Performance chart */}
         {showChart && (
           <PerformanceChart 
+            isOpen={showChart}
             trades={filteredTrades}
             onClose={() => setShowChart(false)}
           />
