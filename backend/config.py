@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     bot_token: str = ""
     backend_url: str = ""
-    database_url: str = "sqlite:///./trades.db"
+    database_url: str = "postgresql://user:password@localhost:5432/tg_trade"
     cors_origins: str = "*"
     mini_app_url: str = ""
     

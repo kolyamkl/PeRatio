@@ -39,6 +39,7 @@ except ImportError as e:
 from database import engine, get_session, init_db
 from models import NotificationSetting, Trade
 from pear_api import fetch_open_positions, parse_positions_for_notification
+from analytics import get_trade_statistics, get_performance_data
 from schemas import (
     ExecuteTradeRequest,
     GenerateTradeRequest,
@@ -1161,6 +1162,40 @@ def get_notification_setting(
     if not setting:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Setting not found")
     return notification_setting_to_schema(setting)
+
+
+@app.get("/api/analytics/statistics")
+def get_statistics(
+    user_id: Optional[str] = None,
+    days: int = 30,
+    session: Session = Depends(get_session)
+) -> Dict[str, Any]:
+    """
+    Get trade statistics from PostgreSQL
+    
+    Query params:
+    - user_id: Filter by user (optional)
+    - days: Number of days to look back (default: 30)
+    """
+    logger.info(f"[ANALYTICS] 📊 Statistics requested - user_id={user_id}, days={days}")
+    return get_trade_statistics(session, user_id, days)
+
+
+@app.get("/api/analytics/performance")
+def get_performance(
+    user_id: Optional[str] = None,
+    days: int = 30,
+    session: Session = Depends(get_session)
+) -> List[Dict[str, Any]]:
+    """
+    Get performance chart data from PostgreSQL
+    
+    Query params:
+    - user_id: Filter by user (optional)
+    - days: Number of days to look back (default: 30)
+    """
+    logger.info(f"[ANALYTICS] 📈 Performance data requested - user_id={user_id}, days={days}")
+    return get_performance_data(session, user_id, days)
 
 
 @app.get("/health", tags=["health"])

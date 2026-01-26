@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Wallet, Settings, CheckCircle, ExternalLink } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { TopBar } from '../components/layout/TopBar'
 import { PairCard } from '../components/trade/PairCard'
 import { ParamsCard } from '../components/trade/ParamsCard'
@@ -8,7 +8,8 @@ import { SettingsModal } from '../components/ui/SettingsModal'
 import { MarketTicker } from '../components/layout/MarketTicker'
 import { TradeSignal } from '../components/trade/TradeSignal'
 import { RiskRewardCard } from '../components/trade/RiskRewardCard'
-import { presetTrade, type Coin, availableCoins } from '../lib/mockData'
+import { WalletConnectionCard } from '../components/wallet/WalletConnectionCard'
+import { type Coin, availableCoins } from '../lib/mockData'
 import { hapticFeedback, getTelegramUserInfo } from '../lib/telegram'
 
 type FrequencyOption = 'never' | '1m' | '5m' | '15m' | '1h' | '2h' | '4h' | 'daily'
@@ -16,110 +17,14 @@ type FrequencyOption = 'never' | '1m' | '5m' | '15m' | '1h' | '2h' | '4h' | 'dai
 export function TradeConfirmPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   
-  // Wallet address for this demo
-  const WALLET_ADDRESS = '0x76F9398Ee268b9fdc06C0dff402B20532922fFAE'
-  
-  // Backend trading wallet state
-  const [backendWallet, setBackendWallet] = useState<{
-    walletAddress: string
-    displayAddress: string
-    hasCredentials: boolean
-    status: string
-    network: string
-    balance: number
-    balanceLoading: boolean
-  } | null>({
-    walletAddress: WALLET_ADDRESS,
-    displayAddress: `${WALLET_ADDRESS.slice(0, 6)}...${WALLET_ADDRESS.slice(-4)}`,
-    hasCredentials: true,
-    status: 'connected',
-    network: 'Arbitrum Mainnet',
-    balance: 0,
-    balanceLoading: true
-  })
-  const [walletLoading, _setWalletLoading] = useState(false)
-  
   // Backend URL - uses env var in production (ngrok), empty for dev (Vite proxy)
   const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
-  
-  // Fetch real wallet balance from Arbitrum
-  useEffect(() => {
-    const fetchWalletBalance = async () => {
-      console.log('[TradeConfirm] 💰 Fetching real wallet balance for:', WALLET_ADDRESS)
-      
-      try {
-        // Use Arbitrum public RPC to get ETH balance
-        const ethBalanceResponse = await fetch('https://arb1.arbitrum.io/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'eth_getBalance',
-            params: [WALLET_ADDRESS, 'latest'],
-            id: 1
-          })
-        })
-        
-        const ethData = await ethBalanceResponse.json()
-        const ethBalanceWei = BigInt(ethData.result || '0')
-        const ethBalance = Number(ethBalanceWei) / 1e18
-        
-        // Fetch USDC balance (Arbitrum USDC contract: 0xaf88d065e77c8cC2239327C5EDb3A432268e5831)
-        const usdcContract = '0xaf88d065e77c8cC2239327C5EDb3A432268e5831'
-        // balanceOf(address) function selector: 0x70a08231
-        const usdcCallData = '0x70a08231000000000000000000000000' + WALLET_ADDRESS.slice(2).toLowerCase()
-        
-        const usdcBalanceResponse = await fetch('https://arb1.arbitrum.io/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'eth_call',
-            params: [{
-              to: usdcContract,
-              data: usdcCallData
-            }, 'latest'],
-            id: 2
-          })
-        })
-        
-        const usdcData = await usdcBalanceResponse.json()
-        const usdcBalanceRaw = BigInt(usdcData.result || '0')
-        const usdcBalance = Number(usdcBalanceRaw) / 1e6 // USDC has 6 decimals
-        
-        console.log('[TradeConfirm] ✅ ETH Balance:', ethBalance.toFixed(6), 'ETH')
-        console.log('[TradeConfirm] ✅ USDC Balance:', usdcBalance.toFixed(2), 'USDC')
-        
-        // Update wallet state with real balance
-        setBackendWallet(prev => prev ? {
-          ...prev,
-          balance: usdcBalance,
-          balanceLoading: false
-        } : null)
-        
-      } catch (err) {
-        console.error('[TradeConfirm] ❌ Error fetching balance:', err)
-        setBackendWallet(prev => prev ? {
-          ...prev,
-          balance: 0,
-          balanceLoading: false
-        } : null)
-      }
-    }
-    
-    fetchWalletBalance()
-    
-    // Refresh balance every 30 seconds
-    const interval = setInterval(fetchWalletBalance, 30000)
-    return () => clearInterval(interval)
-  }, [])
   
   // Log on mount for debugging
   useEffect(() => {
     console.log('[TradeConfirm] 🚀 Component mounted')
     console.log('[TradeConfirm] Backend URL:', backendUrl || '(using proxy)')
     console.log('[TradeConfirm] Mode:', import.meta.env.MODE)
-    console.log('[TradeConfirm] 🔗 Wallet connected:', WALLET_ADDRESS)
   }, [backendUrl])
 
   // Settings state
@@ -128,10 +33,10 @@ export function TradeConfirmPage() {
   const [settingsMessage, setSettingsMessage] = useState('')
   const [savingSettings, setSavingSettings] = useState(false)
 
-  // Trade parameters state
-  const [stopLoss, setStopLoss] = useState(presetTrade.risk.stopLossPct)
-  const [takeProfit, setTakeProfit] = useState(presetTrade.risk.takeProfitPct)
-  const [leverage, setLeverage] = useState(presetTrade.leverage)
+  // Trade parameters state - default values
+  const [stopLoss, setStopLoss] = useState(10)
+  const [takeProfit, setTakeProfit] = useState(20)
+  const [leverage, setLeverage] = useState(2)
   const [longPct, setLongPct] = useState(50)
   const [betAmount, setBetAmount] = useState(20) // Default $20 total ($10 per side) - matches backend cap
 
@@ -144,11 +49,11 @@ export function TradeConfirmPage() {
   }
 
   const [longCoins, setLongCoins] = useState<Coin[]>([
-    getInitialCoin(presetTrade.longCoin.ticker)
+    getInitialCoin('BTC')
   ])
   
   const [shortCoins, setShortCoins] = useState<Coin[]>([
-    getInitialCoin(presetTrade.shortCoin.ticker)
+    getInitialCoin('ETH')
   ])
 
   // State to store tradeId from URL
@@ -435,70 +340,8 @@ export function TradeConfirmPage() {
           <TradeSignal {...signalData} />
         </div>
 
-        {/* Backend Trading Wallet Card */}
-        {walletLoading ? (
-          <div className="card w-full p-5 animate-fade-up">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-bg-tertiary animate-pulse" />
-              <div className="flex-1 space-y-2">
-                <div className="h-5 bg-bg-tertiary rounded animate-pulse w-32" />
-                <div className="h-4 bg-bg-tertiary rounded animate-pulse w-48" />
-              </div>
-            </div>
-          </div>
-        ) : backendWallet?.hasCredentials ? (
-          <div className="card w-full p-5 animate-fade-up">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-green-500/10 flex items-center justify-center relative">
-                  <Wallet className="w-7 h-7 text-green-500" />
-                  <CheckCircle className="absolute -bottom-1 -right-1 w-5 h-5 text-green-500 bg-bg-secondary rounded-full" />
-                </div>
-                <div className="text-left">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-lg font-bold text-text-primary">Trading Wallet</h3>
-                    <span className="px-2 py-0.5 text-xs font-medium bg-green-500/20 text-green-500 rounded-full">Connected</span>
-                  </div>
-                  <p className="text-sm text-text-muted font-mono">{backendWallet.displayAddress}</p>
-                  <div className="flex items-center gap-3 mt-1">
-                    <p className="text-xs text-text-muted">{backendWallet.network}</p>
-                    <span className="text-xs text-text-muted">•</span>
-                    {backendWallet.balanceLoading ? (
-                      <p className="text-xs text-text-muted animate-pulse">Loading balance...</p>
-                    ) : (
-                      <p className="text-xs font-semibold text-green-400">
-                        {backendWallet.balance > 0 
-                          ? `$${backendWallet.balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`
-                          : '0 USDC'
-                        }
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <a 
-                href={`https://arbiscan.io/address/${backendWallet.walletAddress}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-2 rounded-lg bg-bg-tertiary hover:bg-bg-secondary transition-colors"
-              >
-                <ExternalLink className="w-5 h-5 text-text-muted" />
-              </a>
-            </div>
-          </div>
-        ) : (
-          <div className="card w-full p-5 animate-fade-up border-orange-500/30">
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-orange-500/10 flex items-center justify-center">
-                <Wallet className="w-7 h-7 text-orange-500" />
-              </div>
-              <div className="text-left">
-                <h3 className="text-lg font-bold text-text-primary">Wallet Not Configured</h3>
-                <p className="text-sm text-text-muted">Backend wallet credentials missing. Contact admin.</p>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Wallet Connection Card */}
+        <WalletConnectionCard />
         
         {/* Pair Display */}
         <PairCard 
@@ -507,7 +350,7 @@ export function TradeConfirmPage() {
           onLongCoinsChange={setLongCoins}
           onShortCoinsChange={setShortCoins}
           onSwap={handleSwap}
-          marketType={presetTrade.marketType}
+          marketType="Crypto"
         />
 
         {/* Trade Parameters */}
@@ -529,9 +372,9 @@ export function TradeConfirmPage() {
         <div className="h-28" />
       </div>
       
-      {/* Sticky Confirm Button - enabled when backend wallet is configured */}
+      {/* Sticky Confirm Button */}
       <StickyConfirm 
-        disabled={!backendWallet?.hasCredentials}
+        disabled={false}
         tradeId={currentTradeId || undefined}
         tradeData={currentTradeId ? {
           pair: {

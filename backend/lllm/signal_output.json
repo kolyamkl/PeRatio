@@ -1,0 +1,60 @@
+{
+  "pair_id": "SIG_DOGE_vs_ARB_20260126132946",
+  "timestamp": "2026-01-26T13:29:46.348832Z",
+  "source": "llm_signal",
+  "model": "gpt-4o-mini",
+  "basket_category": "MOMENTUM",
+  "confidence": 7,
+  "meets_threshold": true,
+  "thesis": "DOGE is showing positive momentum while ARB is trending down, indicating a favorable long-short opportunity.",
+  "long": {
+    "assets": [
+      {
+        "coin": "DOGE",
+        "weight": 1.0
+      }
+    ],
+    "symbols": [
+      "DOGE"
+    ],
+    "total_weight": 1.0
+  },
+  "short": {
+    "assets": [
+      {
+        "coin": "ARB",
+        "weight": 1.0
+      }
+    ],
+    "symbols": [
+      "ARB"
+    ],
+    "total_weight": 1.0
+  },
+  "weighting_method": "equal",
+  "execution": {
+    "type": "MARKET",
+    "slippage": 0.01,
+    "stop_loss_percent": 13,
+    "take_profit_percent": 20,
+    "risk_reward_ratio": 1.54
+  },
+  "factor_analysis": {
+    "momentum_divergence": 8,
+    "layer_rotation_signal": 1,
+    "volatility_match": 5,
+    "correlation_quality": 3,
+    "funding_favorability": 2,
+    "overall_confluence": 6
+  },
+  "pear_protocol": {
+    "api_url": "https://hl-v2.pearprotocol.io",
+    "client_id": "HLHackathon9",
+    "agent_wallet": ""
+  },
+  "validation": {
+    "is_valid": true,
+    "errors": []
+  },
+  "generated_at": "2026-01-26T13:29:46.348568"
+}
