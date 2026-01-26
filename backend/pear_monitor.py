@@ -7,14 +7,18 @@ import os
 import httpx
 from datetime import datetime
 from typing import Dict, Any, Optional
+from dotenv import load_dotenv
 
-# Telegram API credentials
-API_ID = 30311945
-API_HASH = "591d36ecaecb6b6868cd133ae4224cc5"
-PHONE = "+447786446306"
+# Load environment variables
+load_dotenv()
+
+# Telegram API credentials from environment
+API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
+API_HASH = os.getenv("TELEGRAM_API_HASH", "")
+PHONE = os.getenv("TELEGRAM_PHONE", "")
 
 # Channel to monitor
-SOURCE_CHANNEL = '@agentpear'
+SOURCE_CHANNEL = os.getenv("TELEGRAM_SOURCE_CHANNEL", "@agentpear")
 
 # File to store latest signal for main.py to read
 LATEST_SIGNAL_FILE = os.path.join(os.path.dirname(__file__), "latest_pear_signal.json")
