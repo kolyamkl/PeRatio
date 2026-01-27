@@ -114,8 +114,6 @@ logger.info(f"BOT_TOKEN: {'✅ SET' if settings.bot_token else '❌ MISSING'}")
 logger.info(f"BACKEND_URL: {BACKEND_BASE}")
 logger.info(f"MINI_APP_URL: {MINI_APP_URL}")
 logger.info(f"PEAR_ACCESS_TOKEN: {'✅ SET' if settings.pear_access_token else '❌ MISSING'}")
-logger.info(f"PEAR_USER_WALLET: {settings.pear_user_wallet or '❌ MISSING'}")
-logger.info(f"PEAR_AGENT_WALLET: {settings.pear_agent_wallet or '❌ MISSING'}")
 logger.info("=" * 60)
 
 # Rate limiting: cache signal responses per user (disabled - fresh response every /start)
