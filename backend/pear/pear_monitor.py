@@ -18,8 +18,8 @@ from typing import Dict, Any, Optional
 logger = logging.getLogger(__name__)
 
 # File to store latest signal for main.py to read
-LATEST_SIGNAL_FILE = os.path.join(os.path.dirname(__file__), "latest_pear_signal.json")
-SIGNALS_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "pear_signals_history.json")
+LATEST_SIGNAL_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "latest_pear_signal.json")
+SIGNALS_HISTORY_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "pear_signals_history.json")
 
 # Backend URL for triggering trades
 BACKEND_URL = "http://localhost:8000"
