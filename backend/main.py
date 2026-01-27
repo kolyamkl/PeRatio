@@ -22,6 +22,16 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 
 from config import get_settings
 
+# Security: Import security middleware and utilities
+from security import (
+    RateLimiter,
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+    sanitize_user_id,
+    sanitize_trade_id,
+    validate_numeric_range
+)
+
 # LLM imports removed - using Agent Pear signals only
 from database import engine, get_session, init_db
 from models import NotificationSetting, Trade
@@ -433,6 +443,20 @@ if cors_list:
         allow_headers=["*"],
     )
 
+# Security: Add rate limiting middleware
+# Default limits: 60 req/min, 1000 req/hour per IP/user
+rate_limiter = RateLimiter(
+    requests_per_minute=60,
+    requests_per_hour=1000,
+    burst_size=10
+)
+app.add_middleware(RateLimitMiddleware, limiter=rate_limiter)
+logger.info("[SECURITY] ✅ Rate limiting enabled (60/min, 1000/hour)")
+
+# Security: Add security headers middleware
+app.add_middleware(SecurityHeadersMiddleware)
+logger.info("[SECURITY] ✅ Security headers enabled")
+
 
 def trade_to_response(trade: Trade) -> TradeSchema:
     # Parse basket data from JSON fields
@@ -538,8 +562,14 @@ def notification_setting_to_schema(setting: NotificationSetting) -> Notification
 async def generate_trade(
     payload: GenerateTradeRequest, session: Session = Depends(get_session)
 ) -> Any:
-    """Generate a multi-basket trade signal using Pear Agent API or LLLM SignalGenerator"""
+    """
+    Generate a multi-basket trade signal using Pear Agent API.
+    
+    Security: Input validation handled by GenerateTradeRequest schema.
+    Rate limiting applied via middleware.
+    """
     trade_id = new_trade_id()
+    # Security: User ID already sanitized by Pydantic validator in schema
     user_id = payload.userId
     
     logger.info(f"")
@@ -956,7 +986,35 @@ def get_all_trades(
     limit: int = 50,
     session: Session = Depends(get_session)
 ) -> Any:
-    """Get all trades from database, optionally filtered by user_id or status"""
+    """
+    Get all trades from database, optionally filtered by user_id or status.
+    
+    Security: Input validation on query parameters to prevent injection.
+    """
+    # Security: Validate and sanitize user_id if provided
+    if user_id:
+        try:
+            user_id = sanitize_user_id(user_id)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid user_id: {str(e)}"
+            )
+    
+    # Security: Validate status is one of allowed values
+    if status:
+        allowed_statuses = ["PENDING", "EXECUTED", "CANCELLED", "EXPIRED"]
+        status_upper = status.upper()
+        if status_upper not in allowed_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status. Must be one of: {', '.join(allowed_statuses)}"
+            )
+        status = status_upper
+    
+    # Security: Limit must be reasonable (1-500)
+    limit = max(1, min(500, limit))
+    
     logger.info(f"[API] 📋 Fetching trades - user_id={user_id}, status={status}, limit={limit}")
     
     query = select(Trade)
@@ -964,7 +1022,7 @@ def get_all_trades(
     if user_id:
         query = query.where(Trade.user_id == user_id)
     if status:
-        query = query.where(Trade.status == status.upper())
+        query = query.where(Trade.status == status)
     
     query = query.order_by(Trade.created_at.desc()).limit(limit)
     trades = session.exec(query).all()
@@ -1077,6 +1135,20 @@ async def get_pear_positions() -> Any:
 def get_trade(
     trade_id: str = Path(...), session: Session = Depends(get_session)
 ) -> Any:
+    """
+    Get a specific trade by ID.
+    
+    Security: Validates trade_id format to prevent injection attacks.
+    """
+    # Security: Validate and sanitize trade_id
+    try:
+        trade_id = sanitize_trade_id(trade_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid trade_id format: {str(e)}"
+        )
+    
     logger.info(f"[API] 🔍 Fetching trade: {trade_id}")
     trade = session.exec(select(Trade).where(Trade.trade_id == trade_id)).first()
     if not trade:
