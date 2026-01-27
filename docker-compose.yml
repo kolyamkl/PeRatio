@@ -31,12 +31,15 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
+      LOG_DIR: /app/logs
       PEAR_API_KEY: ${PEAR_API_KEY:-}
       PEAR_CLIENT_ID: ${PEAR_CLIENT_ID:-}
       PEAR_AGENT_WALLET: ${PEAR_AGENT_WALLET:-}
       PEAR_AGENT_API_KEY: ${PEAR_AGENT_API_KEY:-}
       USE_PEAR_AGENT_API: ${USE_PEAR_AGENT_API:-true}
       PEAR_AGENT_FALLBACK_TO_LLM: ${PEAR_AGENT_FALLBACK_TO_LLM:-true}
+    volumes:
+      - ./backend/logs:/app/logs
     ports:
       - "8000:8000"
     depends_on:

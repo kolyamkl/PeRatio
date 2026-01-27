@@ -6,6 +6,7 @@ import json
 import time
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -38,6 +39,7 @@ from models import NotificationSetting, Trade
 from pear_api import fetch_open_positions, parse_positions_for_notification
 from pear_agent_api import fetch_pear_agent_signal
 from pear_monitor import start_monitor as start_pear_monitor, stop_monitor as stop_pear_monitor
+from basket_endpoints import router as basket_router
 
 # Path to latest Pear signal from Telegram monitor
 LATEST_PEAR_SIGNAL_FILE = os.path.join(os.path.dirname(__file__), "latest_pear_signal.json")
@@ -81,25 +83,37 @@ date_format = '%Y-%m-%d %H:%M:%S'
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+log_dir = os.environ.get("LOG_DIR", "/app/logs")
+os.makedirs(log_dir, exist_ok=True)
+log_file_path = os.path.join(log_dir, "backend.log")
+
 # Console handler
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 console_handler.setFormatter(logging.Formatter(log_format, date_format))
-logger.addHandler(console_handler)
 
-# File handler - logs persist to /tmp/tgtrade_backend.log
-file_handler = logging.FileHandler('/tmp/tgtrade_backend.log')
+# File handler - rotating logs
+file_handler = RotatingFileHandler(
+    log_file_path,
+    maxBytes=10 * 1024 * 1024,
+    backupCount=5,
+    encoding="utf-8",
+)
 file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(logging.Formatter(log_format, date_format))
+
+for h in list(logger.handlers):
+    logger.removeHandler(h)
+
+logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
-# Also configure root logger for other modules
-logging.basicConfig(
-    level=logging.INFO,
-    format=log_format,
-    datefmt=date_format,
-    handlers=[console_handler, file_handler]
-)
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+for h in list(root_logger.handlers):
+    root_logger.removeHandler(h)
+root_logger.addHandler(console_handler)
+root_logger.addHandler(file_handler)
 
 settings = get_settings()
 app = FastAPI(title="PeRatio Mini App Backend", version="0.1.0")
@@ -456,6 +470,10 @@ logger.info("[SECURITY] ✅ Rate limiting enabled (60/min, 1000/hour)")
 # Security: Add security headers middleware
 app.add_middleware(SecurityHeadersMiddleware)
 logger.info("[SECURITY] ✅ Security headers enabled")
+
+# Include basket trading router
+app.include_router(basket_router)
+logger.info("[BASKET] ✅ Basket trading endpoints registered")
 
 
 def trade_to_response(trade: Trade) -> TradeSchema:
@@ -1181,6 +1199,261 @@ def get_wallet_info() -> Dict[str, Any]:
     
     logger.info(f"[WALLET] ✅ Returning wallet info: {display_address} - status={result['status']}")
     return result
+
+
+# ============================================================
+# User Wallet Trading Endpoints (Bearer Token Authentication)
+# ============================================================
+
+from pear_wallet_api import (
+    check_agent_wallet,
+    create_agent_wallet,
+    get_user_state,
+    get_positions as get_pear_positions_with_token,
+    execute_trade_with_token,
+    close_position,
+)
+
+
+@app.get("/api/wallet/agent-status")
+async def get_agent_wallet_status(request: Request) -> Dict[str, Any]:
+    """
+    Check agent wallet status using user's Bearer token from Authorization header.
+    Frontend calls this after authenticating with Pear Protocol.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header"
+        )
+    
+    access_token = auth_header.replace("Bearer ", "")
+    logger.info("[WALLET] 🔍 Checking agent wallet status with user token...")
+    
+    try:
+        agent_info = check_agent_wallet(access_token)
+        
+        if agent_info:
+            # Try to get user state to verify wallet is approved
+            try:
+                user_state = get_user_state(access_token)
+                return {
+                    "exists": True,
+                    "agentWalletAddress": agent_info.get("agentWalletAddress"),
+                    "status": "ACTIVE",
+                    "needsApproval": False,
+                    "userState": user_state,
+                }
+            except Exception:
+                return {
+                    "exists": True,
+                    "agentWalletAddress": agent_info.get("agentWalletAddress"),
+                    "status": "PENDING_APPROVAL",
+                    "needsApproval": True,
+                    "approvalUrl": f"https://app.hyperliquid.xyz/api-wallet?agentAddress={agent_info.get('agentWalletAddress')}",
+                }
+        else:
+            return {
+                "exists": False,
+                "agentWalletAddress": None,
+                "status": "NOT_FOUND",
+                "needsApproval": False,
+            }
+    except Exception as e:
+        logger.error(f"[WALLET] ❌ Error checking agent wallet: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to check agent wallet: {str(e)}"
+        )
+
+
+@app.post("/api/wallet/create-agent")
+async def create_agent_wallet_endpoint(request: Request) -> Dict[str, Any]:
+    """
+    Create a new agent wallet using user's Bearer token.
+    Called when user doesn't have an agent wallet yet.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header"
+        )
+    
+    access_token = auth_header.replace("Bearer ", "")
+    logger.info("[WALLET] 🔧 Creating agent wallet with user token...")
+    
+    try:
+        agent_info = create_agent_wallet(access_token)
+        
+        return {
+            "success": True,
+            "agentWalletAddress": agent_info.get("agentWalletAddress"),
+            "status": "PENDING_APPROVAL",
+            "needsApproval": True,
+            "approvalUrl": f"https://app.hyperliquid.xyz/api-wallet?agentAddress={agent_info.get('agentWalletAddress')}",
+            "message": "Agent wallet created. Please approve it on Hyperliquid.",
+        }
+    except Exception as e:
+        logger.error(f"[WALLET] ❌ Error creating agent wallet: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to create agent wallet: {str(e)}"
+        )
+
+
+@app.get("/api/wallet/positions")
+async def get_user_positions(request: Request) -> Dict[str, Any]:
+    """
+    Get user's open positions using their Bearer token.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header"
+        )
+    
+    access_token = auth_header.replace("Bearer ", "")
+    logger.info("[WALLET] 📊 Fetching user positions with token...")
+    
+    try:
+        positions = get_pear_positions_with_token(access_token)
+        
+        # Format positions for frontend
+        formatted = []
+        total_pnl = 0.0
+        total_notional = 0.0
+        
+        for pos in positions:
+            pnl = pos.get("unrealizedPnl", 0)
+            notional = pos.get("positionValue", 0)
+            total_pnl += pnl
+            total_notional += notional
+            
+            formatted.append({
+                "positionId": pos.get("positionId"),
+                "longAssets": pos.get("longAssets", []),
+                "shortAssets": pos.get("shortAssets", []),
+                "unrealizedPnl": pnl,
+                "unrealizedPnlPct": pos.get("unrealizedPnlPercentage", 0) * 100,
+                "positionValue": notional,
+                "leverage": pos.get("leverage", 1),
+                "createdAt": pos.get("createdAt"),
+            })
+        
+        return {
+            "success": True,
+            "positions": formatted,
+            "totalPnl": total_pnl,
+            "totalPnlPct": (total_pnl / total_notional * 100) if total_notional > 0 else 0,
+            "totalNotional": total_notional,
+            "count": len(formatted),
+        }
+    except Exception as e:
+        logger.error(f"[WALLET] ❌ Error fetching positions: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to fetch positions: {str(e)}"
+        )
+
+
+@app.post("/api/wallet/execute-trade")
+async def execute_trade_with_user_token(request: Request) -> Dict[str, Any]:
+    """
+    Execute a trade using user's Bearer token.
+    This uses the user's approved agent wallet on Hyperliquid.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header"
+        )
+    
+    access_token = auth_header.replace("Bearer ", "")
+    
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON body"
+        )
+    
+    # Extract trade parameters
+    long_assets = body.get("longAssets", [])
+    short_assets = body.get("shortAssets", [])
+    usd_value = body.get("usdValue", 10)
+    leverage = body.get("leverage", 2)
+    take_profit_pct = body.get("takeProfitPercent")
+    stop_loss_pct = body.get("stopLossPercent")
+    
+    if not long_assets or not short_assets:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="longAssets and shortAssets are required"
+        )
+    
+    logger.info(f"[WALLET] 🚀 Executing trade with user token...")
+    logger.info(f"[WALLET] Long: {long_assets}, Short: {short_assets}, USD: ${usd_value}")
+    
+    try:
+        result = execute_trade_with_token(
+            access_token=access_token,
+            long_assets=long_assets,
+            short_assets=short_assets,
+            usd_value=usd_value,
+            leverage=leverage,
+            take_profit_percent=take_profit_pct,
+            stop_loss_percent=stop_loss_pct,
+        )
+        
+        return {
+            "success": True,
+            "orderId": result.get("orderId", result.get("id")),
+            "message": "Trade executed successfully",
+            "result": result,
+        }
+    except Exception as e:
+        logger.error(f"[WALLET] ❌ Trade execution failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Trade execution failed: {str(e)}"
+        )
+
+
+@app.delete("/api/wallet/positions/{position_id}")
+async def close_user_position(position_id: str, request: Request) -> Dict[str, Any]:
+    """
+    Close a position using user's Bearer token.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header"
+        )
+    
+    access_token = auth_header.replace("Bearer ", "")
+    logger.info(f"[WALLET] 🔒 Closing position {position_id} with user token...")
+    
+    try:
+        result = close_position(access_token, position_id)
+        
+        return {
+            "success": True,
+            "positionId": position_id,
+            "message": "Position closed successfully",
+            "result": result,
+        }
+    except Exception as e:
+        logger.error(f"[WALLET] ❌ Failed to close position: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to close position: {str(e)}"
+        )
 
 
 @app.post("/api/trades/{trade_id}/execute", response_model=TradeSchema)

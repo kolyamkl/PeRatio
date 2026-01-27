@@ -6,12 +6,12 @@
 
 import { useState } from 'react'
 import { Wallet } from 'lucide-react'
-import { useWalletConnect } from '../../lib/walletConnectProvider'
-import { WalletConnectModal } from './WalletConnectModal'
+import { useWallet } from '../../lib/walletProvider'
+import { WalletConnectModal } from '../WalletConnectModal'
 import { hapticFeedback } from '../../lib/telegram'
 
 export function WalletConnectionCard() {
-  const { isConnected, displayAddress, balance, balanceLoading, disconnect } = useWalletConnect()
+  const { isConnected, displayAddress, balance, balanceLoading, disconnect } = useWallet()
   const [showModal, setShowModal] = useState(false)
 
   const handleConnect = () => {
@@ -90,8 +90,8 @@ export function WalletConnectionCard() {
             <p className="text-sm text-text-muted animate-pulse">Loading...</p>
           ) : (
             <p className="text-sm font-semibold text-green-400">
-              {parseFloat(balance) > 0 
-                ? `$${parseFloat(balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              {balance > 0 
+                ? `$${balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                 : '$0.00'
               }
               <span className="text-text-muted font-normal ml-1">USDC</span>

@@ -1,13 +1,13 @@
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from './components/layout/AppShell'
 import { TradeConfirmPage } from './pages/TradeConfirmPage'
 import { TradesPage } from './pages/TradesPage'
+import { BasketTradePage } from './pages/BasketTradePage'
 import { Toast, ToastProvider } from './components/ui/Toast'
 import { SplashScreen } from './components/layout/SplashScreen'
 import { CryptoBackground } from './components/layout/CryptoBackground'
-import { Web3Provider } from './lib/Web3Provider'
-import { WalletConnectProvider } from './lib/walletConnectProvider'
+import { WalletProvider } from './lib/walletProvider'
 import { getThemeParams } from './lib/telegram'
 
 function AppContent() {
@@ -18,6 +18,7 @@ function AppContent() {
       <Routes>
         <Route path="/" element={<AppShell><TradeConfirmPage /></AppShell>} />
         <Route path="/trades" element={<AppShell><TradesPage /></AppShell>} />
+        <Route path="/basket" element={<AppShell><BasketTradePage /></AppShell>} />
       </Routes>
     </div>
   )
@@ -25,8 +26,8 @@ function AppContent() {
 
 function App() {
   const [themeClass, setThemeClass] = useState('')
-  const [showSplash, setShowSplash] = useState(true)
-  const [appReady, setAppReady] = useState(false)
+  const [showSplash, setShowSplash] = useState(false) // Disabled splash to prevent loop
+  const [appReady, setAppReady] = useState(true) // Start ready
   
   useEffect(() => {
     const theme = getThemeParams()
@@ -39,11 +40,11 @@ function App() {
     }
   }, [])
 
-  const handleSplashComplete = () => {
+  const handleSplashComplete = useCallback(() => {
     setShowSplash(false)
     // Small delay before showing content for smooth transition
     setTimeout(() => setAppReady(true), 100)
-  }
+  }, [])
 
   return (
     <div className={themeClass}>
@@ -53,16 +54,14 @@ function App() {
       {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
       
       <div className={`transition-opacity duration-500 ${appReady ? 'opacity-100' : 'opacity-0'}`}>
-        <Web3Provider>
-          <WalletConnectProvider>
-            <ToastProvider>
-              <BrowserRouter>
-                <AppContent />
-              </BrowserRouter>
-              <Toast />
-            </ToastProvider>
-          </WalletConnectProvider>
-        </Web3Provider>
+        <WalletProvider>
+          <ToastProvider>
+            <BrowserRouter>
+              <AppContent />
+            </BrowserRouter>
+            <Toast />
+          </ToastProvider>
+        </WalletProvider>
       </div>
     </div>
   )

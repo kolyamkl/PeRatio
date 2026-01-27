@@ -12,7 +12,10 @@
     "approve:builder": "tsx src/approve-builder-fees.ts",
     "example:simple": "tsx src/examples/simple-example.ts",
     "example:api": "tsx src/examples/api-client-example.ts",
-    "example:bot": "tsx src/examples/custom-trading-script.ts"
+    "example:bot": "tsx src/examples/custom-trading-script.ts",
+    "sdk:example": "tsx src/sdk/example-usage.ts",
+    "sdk:demo": "tsx src/demo-sdk.ts",
+    "test:quick": "tsx src/quick-test.ts"
   },
   "dependencies": {
     "@nktkas/hyperliquid": "^0.30.2",

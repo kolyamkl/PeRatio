@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Any
 from uuid import uuid4
 import re
 
-from pydantic import BaseModel, Field, validator, constr, confloat, conint
+from pydantic import BaseModel, Field, ConfigDict, ValidationInfo, field_validator, constr, confloat, conint
 
 # Security: Import sanitization utilities
 from security import sanitize_string, sanitize_user_id, sanitize_symbol, validate_numeric_range
@@ -34,7 +34,8 @@ class BasketAssetSchema(BaseModel):
         example=100.0
     )
     
-    @validator('coin')
+    @field_validator('coin')
+    @classmethod
     def validate_coin(cls, v):
         """Sanitize and validate coin symbol"""
         return sanitize_symbol(v)
@@ -65,7 +66,8 @@ class PairLegSchema(BaseModel):
         example=2
     )
     
-    @validator('symbol')
+    @field_validator('symbol')
+    @classmethod
     def validate_symbol(cls, v):
         """Sanitize and validate symbol"""
         return sanitize_symbol(v)
@@ -126,12 +128,10 @@ class TradeSchema(BaseModel):
     confidence: Optional[confloat(ge=0.0, le=10.0)] = None
     factorAnalysis: Optional[Dict[str, Any]] = None
 
-    class Config:
-        populate_by_name = True
-        # Security: Reject extra fields not in schema
-        extra = "forbid"
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
     
-    @validator('reasoning')
+    @field_validator('reasoning')
+    @classmethod
     def sanitize_reasoning(cls, v):
         """Sanitize reasoning text"""
         return sanitize_string(v, max_length=2000)
@@ -155,15 +155,16 @@ class GenerateTradeRequest(BaseModel):
         description="Additional context for trade generation"
     )
     
-    class Config:
-        extra = "forbid"  # Reject unexpected fields
+    model_config = ConfigDict(extra="forbid")
     
-    @validator('userId')
+    @field_validator('userId')
+    @classmethod
     def validate_user_id(cls, v):
         """Sanitize and validate user ID"""
         return sanitize_user_id(v)
     
-    @validator('context')
+    @field_validator('context')
+    @classmethod
     def sanitize_context(cls, v):
         """Sanitize context if provided"""
         if v:
@@ -193,7 +194,8 @@ class BasketAsset(BaseModel):
         example=1.0
     )
     
-    @validator('coin')
+    @field_validator('coin')
+    @classmethod
     def validate_coin(cls, v):
         """Sanitize coin symbol"""
         return sanitize_symbol(v)
@@ -229,11 +231,11 @@ class ExecuteTradeRequest(BaseModel):
         description="Short basket assets"
     )
     
-    class Config:
-        extra = "forbid"  # Reject unexpected fields
+    model_config = ConfigDict(extra="forbid")
 
-    @validator("takeProfitRatio", "stopLossRatio")
-    def ratios_reasonable(cls, v: float, field) -> float:
+    @field_validator("takeProfitRatio", "stopLossRatio")
+    @classmethod
+    def ratios_reasonable(cls, v: float, info: ValidationInfo) -> float:
         """
         Validate TP/SL ratios are in decimal form and reasonable.
         
@@ -243,14 +245,15 @@ class ExecuteTradeRequest(BaseModel):
             raise ValueError("Ratios should be in decimal form (e.g., 0.05 for 5%)")
         
         # Additional safety: TP should be positive, SL should be negative
-        if field.name == "takeProfitRatio" and v <= 0:
+        if info.field_name == "takeProfitRatio" and v <= 0:
             raise ValueError("Take profit ratio must be positive")
-        if field.name == "stopLossRatio" and v >= 0:
+        if info.field_name == "stopLossRatio" and v >= 0:
             raise ValueError("Stop loss ratio must be negative")
         
         return v
     
-    @validator("longBasket", "shortBasket")
+    @field_validator("longBasket", "shortBasket")
+    @classmethod
     def validate_baskets(cls, v: List[BasketAsset]) -> List[BasketAsset]:
         """
         Validate basket composition.
@@ -303,15 +306,16 @@ class ParseTradeMessageRequest(BaseModel):
         description="Optional reasoning text"
     )
     
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
     
-    @validator('userId')
+    @field_validator('userId')
+    @classmethod
     def validate_user_id(cls, v):
         """Sanitize user ID"""
         return sanitize_user_id(v)
     
-    @validator('chatId')
+    @field_validator('chatId')
+    @classmethod
     def validate_chat_id(cls, v):
         """Sanitize chat ID (numeric or negative for groups)"""
         v = sanitize_string(v, max_length=100)
@@ -319,11 +323,12 @@ class ParseTradeMessageRequest(BaseModel):
             raise ValueError("Invalid chat ID format")
         return v
     
-    @validator('message', 'reasoning')
-    def sanitize_text(cls, v):
+    @field_validator('message', 'reasoning')
+    @classmethod
+    def sanitize_text(cls, v, info: ValidationInfo):
         """Sanitize text fields"""
         if v:
-            max_len = 4000 if cls.__fields__['message'] else 2000
+            max_len = 4000 if info.field_name == 'message' else 2000
             return sanitize_string(v, max_length=max_len)
         return v
 
@@ -362,16 +367,16 @@ class NotificationSettingSchema(BaseModel):
     )
     lastSentAt: Optional[datetime] = None
 
-    class Config:
-        populate_by_name = True
-        extra = "forbid"
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
     
-    @validator('userId')
+    @field_validator('userId')
+    @classmethod
     def validate_user_id(cls, v):
         """Sanitize user ID"""
         return sanitize_user_id(v)
     
-    @validator('chatId')
+    @field_validator('chatId')
+    @classmethod
     def validate_chat_id(cls, v):
         """Sanitize chat ID"""
         v = sanitize_string(v, max_length=100)
@@ -379,7 +384,8 @@ class NotificationSettingSchema(BaseModel):
             raise ValueError("Invalid chat ID format")
         return v
     
-    @validator('timezone')
+    @field_validator('timezone')
+    @classmethod
     def validate_timezone(cls, v):
         """Validate timezone is a known IANA timezone"""
         from zoneinfo import ZoneInfo, available_timezones
@@ -424,15 +430,16 @@ class SaveNotificationSettingRequest(BaseModel):
         description="IANA timezone"
     )
     
-    class Config:
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
     
-    @validator('userId')
+    @field_validator('userId')
+    @classmethod
     def validate_user_id(cls, v):
         """Sanitize user ID"""
         return sanitize_user_id(v)
     
-    @validator('chatId')
+    @field_validator('chatId')
+    @classmethod
     def validate_chat_id(cls, v):
         """Sanitize chat ID"""
         v = sanitize_string(v, max_length=100)
@@ -440,7 +447,8 @@ class SaveNotificationSettingRequest(BaseModel):
             raise ValueError("Invalid chat ID format")
         return v
     
-    @validator('timezone')
+    @field_validator('timezone')
+    @classmethod
     def validate_timezone(cls, v):
         """Validate timezone"""
         from zoneinfo import ZoneInfo, available_timezones

@@ -54,14 +54,13 @@ Thumbs.db
 venv/
 **/venv/
 
-# Generated signal files (keep only signal_output.json)
-backend/lllm/crypto_signal_*.json
-backend/lllm/llm_signal_*.json
-backend/lllm/pair_signal_*.json
-backend/lllm/pair_position_*.json
-backend/lllm/test_signal.json
-backend/lllm/execution_output.json
-backend/lllm/pairs_output.json
+# Telegram session files (sensitive - never commit)
+*.session
+*.session-journal
+
+# Backend logs (generated at runtime)
+backend/logs/*.log
+backend/logs/*.log.*
 
 # Temporary files
 *.tmp

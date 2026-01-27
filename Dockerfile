@@ -16,7 +16,7 @@ ENV NPM_CONFIG_FETCH_TIMEOUT=300000 \
 COPY package*.json ./
 
 # Install dependencies with retry logic
-RUN npm ci --prefer-offline --no-audit
+RUN npm install --prefer-offline --no-audit
 
 # Copy source code
 COPY . .
