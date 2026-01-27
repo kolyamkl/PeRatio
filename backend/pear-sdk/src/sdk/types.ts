@@ -97,8 +97,8 @@ export interface AgentPearSignal {
 export interface PearSDKConfig {
   apiUrl?: string;
   clientId?: string;
-  privateKey?: string;
   autoRefreshToken?: boolean;
+  // NOTE: privateKey removed - authentication handled in frontend with user's wallet
 }
 
 // Order Types

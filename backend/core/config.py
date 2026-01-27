@@ -25,10 +25,10 @@ class Settings(BaseSettings):
     # Pear Protocol settings
     pear_api_url: str = "https://hl-v2.pearprotocol.io"
     pear_client_id: str = "HLHackathon9"
-    pear_private_key: str = ""
-    pear_user_wallet: str = ""
-    pear_agent_wallet: str = ""
-    pear_access_token: str = ""
+    # NOTE: Private keys removed - users authenticate with their own wallets in frontend
+    pear_user_wallet: str = ""  # Deprecated - for reference only
+    pear_agent_wallet: str = ""  # Deprecated - for reference only
+    pear_access_token: str = ""  # Deprecated - tokens come from frontend
     
     # Pear Agent API settings (https://api.pear.garden)
     pear_agent_api_key: str = ""  # API key for Pear Agent signals

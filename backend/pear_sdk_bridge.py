@@ -19,8 +19,7 @@ SDK_SCRIPT = SDK_PATH / "src" / "sdk" / "example-usage.ts"
 class PearSDKBridge:
     """Bridge to execute Pear Protocol SDK operations from Python"""
     
-    def __init__(self, private_key: Optional[str] = None):
-        self.private_key = private_key
+    def __init__(self):
         self.sdk_path = SDK_PATH
     
     def _run_tsx_command(self, script_content: str) -> Dict[str, Any]:
@@ -60,42 +59,9 @@ class PearSDKBridge:
             logger.error(f"SDK bridge error: {e}")
             return {"success": False, "error": str(e)}
     
-    def authenticate(self, private_key: str) -> Dict[str, Any]:
-        """Authenticate with Pear Protocol using user's private key"""
-        script = f"""
-import {{ createPearSDK }} from './src/sdk/index.js';
-import {{ config }} from 'dotenv';
-config();
-
-async function main() {{
-    try {{
-        const sdk = createPearSDK({{
-            privateKey: '{private_key}',
-            apiUrl: process.env.API_URL,
-            clientId: process.env.CLIENT_ID || 'APITRADER',
-        }});
-        
-        const tokens = await sdk.authenticate();
-        const walletAddress = sdk.getWalletAddress();
-        
-        console.log(JSON.stringify({{
-            success: true,
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken,
-            walletAddress: walletAddress,
-            expiresAt: tokens.expiresAt
-        }}));
-    }} catch (error) {{
-        console.log(JSON.stringify({{
-            success: false,
-            error: error.message
-        }}));
-    }}
-}}
-
-main();
-"""
-        return self._run_tsx_command(script)
+    # Authentication is now handled entirely in frontend
+    # Frontend signs EIP-712 message and gets access token directly
+    # Backend only receives and uses the access token
     
     def execute_basket_trade(
         self,

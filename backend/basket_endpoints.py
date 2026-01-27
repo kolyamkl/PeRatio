@@ -38,35 +38,9 @@ class ClosePositionRequest(BaseModel):
     percentage: float = Field(1.0, ge=0, le=1, description="Percentage to close (1.0 = 100%)")
 
 
-class AuthenticateRequest(BaseModel):
-    privateKey: str = Field(..., description="User's wallet private key (0x...)")
-
-
-# Endpoints
-@router.post("/authenticate")
-async def authenticate_wallet(request: AuthenticateRequest) -> Dict[str, Any]:
-    """
-    Authenticate user's wallet with Pear Protocol
-    Returns access token for subsequent API calls
-    """
-    try:
-        result = await pear_basket_api.authenticate_user_wallet(request.privateKey)
-        
-        if not result.get('success'):
-            raise HTTPException(status_code=401, detail=result.get('error', 'Authentication failed'))
-        
-        return {
-            "success": True,
-            "accessToken": result.get('accessToken'),
-            "refreshToken": result.get('refreshToken'),
-            "walletAddress": result.get('walletAddress'),
-            "expiresAt": result.get('expiresAt')
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Authentication endpoint error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# Authentication is handled in frontend via pearAuth.ts
+# Frontend signs EIP-712 message with user's wallet and gets access token
+# Backend endpoints only receive and validate the access token
 
 
 @router.post("/execute")

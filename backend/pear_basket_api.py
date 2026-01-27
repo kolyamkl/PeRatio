@@ -16,21 +16,9 @@ class PearBasketAPI:
     def __init__(self):
         self.sdk_bridge = PearSDKBridge()
     
-    async def authenticate_user_wallet(self, private_key: str) -> Dict[str, Any]:
-        """
-        Authenticate user's wallet with Pear Protocol
-        Returns access token and wallet address
-        """
-        try:
-            result = self.sdk_bridge.authenticate(private_key)
-            if result.get('success'):
-                logger.info(f"User wallet authenticated: {result.get('walletAddress')}")
-            else:
-                logger.error(f"Authentication failed: {result.get('error')}")
-            return result
-        except Exception as e:
-            logger.error(f"Authentication error: {e}")
-            return {"success": False, "error": str(e)}
+    # Authentication removed - frontend handles directly with Pear Protocol
+    # User signs EIP-712 message in their wallet, gets access token
+    # Backend only uses the access token provided by frontend
     
     async def execute_basket_trade(
         self,

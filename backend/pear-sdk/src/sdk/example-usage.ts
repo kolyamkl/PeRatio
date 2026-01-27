@@ -29,18 +29,19 @@ async function example1_BasicSetup() {
   console.log('EXAMPLE 1: Basic Setup & Authentication');
   console.log('═══════════════════════════════════════════════════\n');
 
-  // Create SDK instance
+  // Create SDK instance (no private key needed!)
   const sdk = createPearSDK({
     apiUrl: process.env.API_URL,
     clientId: process.env.CLIENT_ID,
-    privateKey: process.env.PRIVATE_KEY,
   });
 
-  // Authenticate
-  const tokens = await sdk.authenticate();
-  console.log('✅ Authenticated!');
-  console.log(`   Wallet: ${sdk.getWalletAddress()}`);
-  console.log(`   Token expires: ${new Date(tokens.expiresAt!).toISOString()}`);
+  // Set access token from frontend
+  // In production, this token comes from the frontend after user signs EIP-712 message
+  const mockAccessToken = 'eyJ...'; // This would come from frontend authentication
+  sdk.setAccessToken(mockAccessToken);
+  
+  console.log('✅ Access token set!');
+  console.log('   NOTE: In production, user authenticates in frontend with their wallet\n');
 
   // Check/create agent wallet
   const agentWallet = await sdk.ensureAgentWallet();

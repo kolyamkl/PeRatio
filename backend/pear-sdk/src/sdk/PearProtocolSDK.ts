@@ -29,8 +29,6 @@ const DEFAULT_CLIENT_ID = 'APITRADER';
 export class PearProtocolSDK {
   private apiUrl: string;
   private clientId: string;
-  private privateKey?: string;
-  private wallet?: ethers.Wallet;
   private accessToken?: string;
   private refreshToken?: string;
   private tokenExpiresAt?: number;
@@ -40,12 +38,7 @@ export class PearProtocolSDK {
   constructor(config: PearSDKConfig = {}) {
     this.apiUrl = config.apiUrl || DEFAULT_API_URL;
     this.clientId = config.clientId || DEFAULT_CLIENT_ID;
-    this.privateKey = config.privateKey;
     this.autoRefreshToken = config.autoRefreshToken ?? true;
-
-    if (this.privateKey) {
-      this.wallet = new ethers.Wallet(this.privateKey);
-    }
 
     this.axiosInstance = axios.create({
       baseURL: this.apiUrl,
@@ -70,69 +63,16 @@ export class PearProtocolSDK {
   // ============================================
   // AUTHENTICATION
   // ============================================
-
   /**
-   * Set private key for wallet operations
+   * AUTHENTICATION IS HANDLED IN FRONTEND
+   * 
+   * User connects wallet (MetaMask, WalletConnect, etc.) in browser
+   * User signs EIP-712 message in their wallet
+   * Frontend gets access token directly from Pear Protocol
+   * Frontend passes token to backend via setAccessToken()
+   * 
+   * This ensures private keys never leave the user's wallet
    */
-  setPrivateKey(privateKey: string): void {
-    this.privateKey = privateKey;
-    this.wallet = new ethers.Wallet(privateKey);
-  }
-
-  /**
-   * Get wallet address
-   */
-  getWalletAddress(): string | null {
-    return this.wallet?.address || null;
-  }
-
-  /**
-   * Authenticate with Pear Protocol using EIP-712 signature
-   * @returns AuthTokens containing access and refresh tokens
-   */
-  async authenticate(): Promise<AuthTokens> {
-    if (!this.wallet) {
-      throw new Error('Wallet not initialized. Call setPrivateKey() first.');
-    }
-
-    // Step 1: Get EIP-712 message
-    const msgResponse = await axios.get(`${this.apiUrl}/auth/eip712-message`, {
-      params: { address: this.wallet.address, clientId: this.clientId },
-    });
-    const eipData = msgResponse.data;
-
-    // Step 2: Sign the message
-    const domain = eipData.domain;
-    const types = { ...eipData.types };
-    const value = eipData.message;
-
-    // Remove EIP712Domain if present (ethers handles this automatically)
-    if (types.EIP712Domain) {
-      delete types.EIP712Domain;
-    }
-
-    const signature = await this.wallet.signTypedData(domain, types, value);
-
-    // Step 3: Login and get tokens
-    const loginResponse = await axios.post(`${this.apiUrl}/auth/login`, {
-      method: 'eip712',
-      address: this.wallet.address,
-      clientId: this.clientId,
-      details: { signature, timestamp: value.timestamp },
-    });
-
-    this.accessToken = loginResponse.data.accessToken;
-    this.refreshToken = loginResponse.data.refreshToken;
-    
-    // Set token expiry (default 15 minutes from now)
-    this.tokenExpiresAt = Date.now() + (15 * 60 * 1000);
-
-    return {
-      accessToken: this.accessToken!,
-      refreshToken: this.refreshToken,
-      expiresAt: this.tokenExpiresAt,
-    };
-  }
 
   /**
    * Set access token directly (for frontend integration)
@@ -638,11 +578,10 @@ export class PearProtocolSDK {
   /**
    * Get SDK configuration
    */
-  getConfig(): { apiUrl: string; clientId: string; walletAddress: string | null } {
+  getConfig(): { apiUrl: string; clientId: string } {
     return {
       apiUrl: this.apiUrl,
       clientId: this.clientId,
-      walletAddress: this.getWalletAddress(),
     };
   }
 

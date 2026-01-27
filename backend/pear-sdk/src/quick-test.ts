@@ -16,15 +16,16 @@ async function main() {
   try {
     // Create SDK instance
     const sdk = createPearSDK({
-      privateKey: process.env.PRIVATE_KEY,
       apiUrl: process.env.API_URL,
       clientId: process.env.CLIENT_ID || 'APITRADER',
     });
 
-    // 1. Authenticate
-    console.log('🔐 Authenticating...');
-    const tokens = await sdk.authenticate();
-    console.log(`✅ Authenticated: ${sdk.getWalletAddress()}\n`);
+    // 1. Set access token (from frontend authentication)
+    console.log('🔐 Setting access token...');
+    console.log('   NOTE: In production, this comes from frontend after user signs EIP-712');
+    const mockToken = 'mock_token_for_testing';
+    sdk.setAccessToken(mockToken);
+    console.log(`✅ Token set\n`);
 
     // 2. Check agent wallet
     console.log('📊 Checking agent wallet...');

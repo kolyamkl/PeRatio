@@ -32,35 +32,10 @@ export interface AgentSignal {
 }
 
 /**
- * Authenticate user wallet with Pear Protocol via backend
+ * Authentication is handled by pearAuth.ts
+ * User signs EIP-712 message with their wallet and gets access token directly from Pear Protocol
+ * No private keys are ever sent to backend
  */
-export async function authenticateWallet(privateKey: string): Promise<{
-  success: boolean;
-  accessToken?: string;
-  refreshToken?: string;
-  walletAddress?: string;
-  expiresAt?: number;
-  error?: string;
-}> {
-  try {
-    const response = await fetch(`${API_BASE}/api/basket/authenticate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ privateKey }),
-    });
-
-    const data = await response.json();
-    
-    if (!response.ok) {
-      throw new Error(data.detail || 'Authentication failed');
-    }
-
-    return data;
-  } catch (error: any) {
-    console.error('[BasketAPI] Authentication error:', error);
-    return { success: false, error: error.message };
-  }
-}
 
 /**
  * Execute basket trade
