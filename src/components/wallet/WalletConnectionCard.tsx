@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import { Wallet } from 'lucide-react'
 import { useWallet } from '../../lib/walletProvider'
-import { WalletConnectModal } from '../WalletConnectModal'
+import { WalletModal } from './WalletModal'
 import { hapticFeedback } from '../../lib/telegram'
 
 export function WalletConnectionCard() {
@@ -50,7 +50,7 @@ export function WalletConnectionCard() {
           </div>
         </div>
 
-        <WalletConnectModal 
+        <WalletModal 
           isOpen={showModal} 
           onClose={() => setShowModal(false)} 
         />

@@ -4,6 +4,8 @@
  */
 
 import { createContext, useContext, ReactNode, useEffect, useState, useCallback } from 'react'
+import { useAccount, useDisconnect } from 'wagmi'
+import { getDeviceInfo } from './deviceDetection'
 import {
   authenticateWithPear,
   checkAgentWallet,
@@ -150,6 +152,36 @@ async function fetchUSDCBalance(address: string): Promise<number> {
  */
 export function WalletProvider({ children }: WalletProviderProps) {
   const [state, setState] = useState<WalletState>(defaultState)
+  
+  // Wagmi hooks for Web3Modal integration
+  const { address: wagmiAddress, isConnected: wagmiIsConnected, connector } = useAccount()
+  const { disconnect: wagmiDisconnect } = useDisconnect()
+
+  // Sync Wagmi/Web3Modal state with WalletProvider state
+  useEffect(() => {
+    if (wagmiIsConnected && wagmiAddress) {
+      console.log('[WalletProvider] Web3Modal connected:', wagmiAddress)
+      
+      setState(prev => ({
+        ...prev,
+        isConnected: true,
+        isConnecting: false,
+        address: wagmiAddress,
+        displayAddress: `${wagmiAddress.slice(0, 6)}...${wagmiAddress.slice(-4)}`,
+        walletType: 'walletconnect',
+        balanceLoading: true,
+      }))
+      
+      // Fetch balance
+      fetchUSDCBalance(wagmiAddress).then(balance => {
+        setState(prev => ({ ...prev, balance, balanceLoading: false }))
+      })
+    } else if (!wagmiIsConnected && state.isConnected) {
+      console.log('[WalletProvider] Web3Modal disconnected')
+      setState(defaultState)
+      clearAuthState()
+    }
+  }, [wagmiIsConnected, wagmiAddress])
 
   // Check for existing auth on mount
   useEffect(() => {
@@ -255,6 +287,30 @@ export function WalletProvider({ children }: WalletProviderProps) {
     setState(prev => ({ ...prev, isConnecting: true, error: null }))
     
     try {
+      // Special handling for WalletConnect - use Web3Modal
+      if (walletType === 'walletconnect') {
+        const deviceInfo = getDeviceInfo()
+        console.log('[Wallet] Device info:', deviceInfo)
+        
+        // Import Web3Modal dynamically
+        const { useWeb3Modal } = await import('@web3modal/wagmi/react')
+        
+        // For WalletConnect, we need to trigger the Web3Modal
+        // This will show QR code on desktop or redirect to wallet app on mobile
+        console.log('[Wallet] Opening Web3Modal for WalletConnect...')
+        
+        // Signal that we're waiting for WalletConnect
+        setState(prev => ({ 
+          ...prev, 
+          error: 'Please scan QR code or approve connection in your wallet app'
+        }))
+        
+        // The actual connection will be handled by the Web3Modal
+        // For now, return false to keep the modal open
+        return false
+      }
+      
+      // For browser extension wallets (MetaMask, Coinbase)
       const provider = getProvider(walletType)
       
       if (!provider) {
@@ -306,9 +362,15 @@ export function WalletProvider({ children }: WalletProviderProps) {
    */
   const disconnect = useCallback(async (): Promise<void> => {
     console.log('[Wallet] 🔌 Disconnecting wallet')
+    
+    // Disconnect Web3Modal/Wagmi if connected
+    if (wagmiIsConnected) {
+      await wagmiDisconnect()
+    }
+    
     clearAuthState()
     setState(defaultState)
-  }, [])
+  }, [wagmiIsConnected, wagmiDisconnect])
 
   /**
    * Refresh balance

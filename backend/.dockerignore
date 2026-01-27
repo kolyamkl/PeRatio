@@ -4,9 +4,6 @@ venv/
 env/
 ENV/
 
-# Exclude pear-sdk (96MB - not needed in container)
-pear-sdk/
-
 # Python
 __pycache__/
 **/__pycache__/

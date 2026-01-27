@@ -42,6 +42,7 @@ from pear import (
     start_monitor as start_pear_monitor,
     stop_monitor as stop_pear_monitor,
 )
+from basket_endpoints import router as basket_router
 
 # Path to latest Pear signal from Telegram monitor
 LATEST_PEAR_SIGNAL_FILE = os.path.join(os.path.dirname(__file__), "latest_pear_signal.json")
@@ -111,6 +112,8 @@ app = FastAPI(title="PeRatio Mini App Backend", version="0.1.0")
 telegram_app: Optional[Application] = None
 BACKEND_BASE = settings.backend_url or os.environ.get("BACKEND_URL", "")
 MINI_APP_URL = settings.mini_app_url or os.environ.get("MINI_APP_URL", "https://example.com")
+
+app.include_router(basket_router)
 
 logger.info("=" * 60)
 logger.info("🚀 TG_TRADE BACKEND STARTING")
@@ -1161,28 +1164,21 @@ def get_trade(
     return trade_to_response(trade)
 
 
-@app.get("/api/wallet/info")
-def get_wallet_info() -> Dict[str, Any]:
-    """Get the backend trading wallet info for display in frontend"""
+@app.get("/api/wallet")
+def get_wallet_info():
+    """Get wallet connection status - NO hardcoded wallet addresses returned"""
     logger.info("[WALLET] 💰 Wallet info requested")
     
-    wallet_address = settings.pear_user_wallet or ""
-    agent_wallet = settings.pear_agent_wallet or ""
-    has_credentials = bool(settings.pear_access_token and wallet_address)
-    
-    # Shorten address for display
-    display_address = f"{wallet_address[:6]}...{wallet_address[-4:]}" if len(wallet_address) > 10 else wallet_address
-    
+    # NO hardcoded wallet addresses - users must connect their own wallets
     result = {
-        "walletAddress": wallet_address,
-        "displayAddress": display_address,
-        "agentWallet": agent_wallet,
-        "hasCredentials": has_credentials,
-        "network": "Hyperliquid (via Pear Protocol)",
-        "status": "connected" if has_credentials else "not_configured"
+        "walletAddress": "",
+        "displayAddress": "",
+        "agentWallet": "",
+        "hasCredentials": False,
+        "message": "Connect your wallet in the frontend to execute trades"
     }
     
-    logger.info(f"[WALLET] ✅ Returning wallet info: {display_address} - status={result['status']}")
+    logger.info(f"[WALLET] Returning wallet info: {result}")
     return result
 
 
@@ -1232,9 +1228,19 @@ def execute_trade(
     # Execute via Pear Protocol API
     if settings.pear_access_token and settings.pear_api_url:
         try:
+            # ONLY use connected wallet from payload - NO hardcoded fallback
+            user_wallet = payload.walletAddress
+            
+            if not user_wallet:
+                logger.error("[PEAR] ❌ No wallet address provided - connected wallet required")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Wallet address required. Please connect your wallet."
+                )
+            
             logger.info(f"[PEAR] 🍐 Executing trade via Pear Protocol...")
             logger.info(f"[PEAR] API URL: {settings.pear_api_url}")
-            logger.info(f"[PEAR] User wallet: {settings.pear_user_wallet}")
+            logger.info(f"[PEAR] User wallet (connected): {user_wallet}")
             
             # Get baskets from request (sent from mini app) - these are the actual assets user sees
             request_long_basket = payload.longBasket if payload.longBasket else []

@@ -11,11 +11,15 @@ import { RiskRewardCard } from '../components/trade/RiskRewardCard'
 import { WalletConnectionCard } from '../components/wallet/WalletConnectionCard'
 import { type Coin, availableCoins } from '../lib/mockData'
 import { hapticFeedback, getTelegramUserInfo } from '../lib/telegram'
+import { useWallet } from '../lib/walletProvider'
 
 type FrequencyOption = 'never' | '1m' | '5m' | '15m' | '1h' | '2h' | '4h' | 'daily'
 
 export function TradeConfirmPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  
+  // Get connected wallet - REQUIRED for trade execution (no hardcoded fallback)
+  const wallet = useWallet()
   
   // Backend URL - uses env var in production (ngrok), empty for dev (Vite proxy)
   const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
@@ -376,6 +380,7 @@ export function TradeConfirmPage() {
       <StickyConfirm 
         disabled={false}
         tradeId={currentTradeId || undefined}
+        walletAddress={wallet.address || undefined}
         tradeData={currentTradeId ? {
           pair: {
             long: { 

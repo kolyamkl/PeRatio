@@ -1,7 +1,9 @@
 import { createPortal } from 'react-dom'
+import { useEffect } from 'react'
 import { X, Wallet, QrCode } from 'lucide-react'
 import { hapticFeedback } from '../../lib/telegram'
 import { useWeb3Modal } from '@web3modal/wagmi/react'
+import { useAccount } from 'wagmi'
 
 interface WalletModalProps {
   isOpen: boolean
@@ -10,6 +12,16 @@ interface WalletModalProps {
 
 export function WalletModal({ isOpen, onClose }: WalletModalProps) {
   const { open } = useWeb3Modal()
+  const { isConnected } = useAccount()
+
+  // Auto-close modal when wallet connects
+  useEffect(() => {
+    if (isConnected && isOpen) {
+      console.log('[WalletModal] ✅ Wallet connected, closing modal')
+      hapticFeedback('notification', 'success')
+      onClose()
+    }
+  }, [isConnected, isOpen, onClose])
 
   const handleConnect = async () => {
     console.log('[WalletModal] 🔗 Opening WalletConnect QR modal...')
@@ -20,9 +32,6 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
       await open()
       
       console.log('[WalletModal] ✅ Web3Modal opened')
-      
-      // Close our modal
-      onClose()
     } catch (error) {
       console.error('[WalletModal] ❌ Failed to open Web3Modal:', error)
       hapticFeedback('notification', 'error')

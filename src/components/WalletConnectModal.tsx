@@ -5,6 +5,8 @@
 
 import { useState, useEffect } from 'react'
 import { useWallet } from '../lib/walletProvider'
+import { useWeb3Modal } from '@web3modal/wagmi/react'
+import { getDeviceInfo } from '../lib/deviceDetection'
 import { Wallet, ExternalLink, CheckCircle, AlertCircle, Loader2, X } from 'lucide-react'
 
 interface WalletConnectModalProps {
@@ -47,10 +49,34 @@ export function WalletConnectModal({ isOpen, onClose }: WalletConnectModalProps)
     }
   }, [isConnected, isPearAuthenticated, agentWallet, needsApproval])
 
+  const { open: openWeb3Modal } = useWeb3Modal()
+  const deviceInfo = getDeviceInfo()
+
   const handleWalletSelect = async (walletType: 'metamask' | 'walletconnect' | 'coinbase') => {
     setLocalError(null)
     setStep('connecting')
     
+    // Special handling for WalletConnect - use Web3Modal
+    if (walletType === 'walletconnect') {
+      console.log('[WalletConnectModal] Opening Web3Modal for WalletConnect')
+      console.log('[WalletConnectModal] Device:', deviceInfo)
+      
+      try {
+        // Open Web3Modal - it will show QR code on desktop or redirect to wallet app on mobile
+        await openWeb3Modal()
+        
+        // Web3Modal handles the connection, so we don't call connect() here
+        // The wallet state will be updated automatically when connection succeeds
+        console.log('[WalletConnectModal] Web3Modal opened successfully')
+      } catch (error: any) {
+        console.error('[WalletConnectModal] Failed to open Web3Modal:', error)
+        setLocalError('Failed to open wallet connection. Please try again.')
+        setStep('select')
+      }
+      return
+    }
+    
+    // For browser extension wallets (MetaMask, Coinbase)
     const success = await connect(walletType)
     
     if (!success) {
@@ -127,6 +153,17 @@ export function WalletConnectModal({ isOpen, onClose }: WalletConnectModalProps)
                 <div className="text-left">
                   <p className="font-semibold text-white">MetaMask</p>
                   <p className="text-sm text-gray-400">Connect using browser extension</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => handleWalletSelect('walletconnect')}
+                className="w-full flex items-center gap-4 p-4 bg-gray-800/50 hover:bg-gray-800 rounded-xl transition-colors"
+              >
+                <img src="https://docs.walletconnect.com/img/walletconnect-logo.svg" alt="WalletConnect" className="w-10 h-10" />
+                <div className="text-left">
+                  <p className="font-semibold text-white">WalletConnect</p>
+                  <p className="text-sm text-gray-400">Scan QR code with mobile wallet</p>
                 </div>
               </button>
 

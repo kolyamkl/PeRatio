@@ -8,6 +8,7 @@ import { Toast, ToastProvider } from './components/ui/Toast'
 import { SplashScreen } from './components/layout/SplashScreen'
 import { CryptoBackground } from './components/layout/CryptoBackground'
 import { WalletProvider } from './lib/walletProvider'
+import { Web3Provider } from './lib/Web3Provider'
 import { getThemeParams } from './lib/telegram'
 
 function AppContent() {
@@ -54,14 +55,16 @@ function App() {
       {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
       
       <div className={`transition-opacity duration-500 ${appReady ? 'opacity-100' : 'opacity-0'}`}>
-        <WalletProvider>
-          <ToastProvider>
-            <BrowserRouter>
-              <AppContent />
-            </BrowserRouter>
-            <Toast />
-          </ToastProvider>
-        </WalletProvider>
+        <Web3Provider>
+          <WalletProvider>
+            <ToastProvider>
+              <BrowserRouter>
+                <AppContent />
+              </BrowserRouter>
+              <Toast />
+            </ToastProvider>
+          </WalletProvider>
+        </Web3Provider>
       </div>
     </div>
   )

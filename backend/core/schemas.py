@@ -212,6 +212,13 @@ class ExecuteTradeRequest(BaseModel):
     Security: Validates all trading parameters are within safe ranges.
     """
     pair: dict  # Validated in endpoint
+    walletAddress: str = Field(
+        ...,
+        description="User's connected wallet address (REQUIRED - no hardcoded fallback)",
+        example="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
+        min_length=42,
+        max_length=42
+    )
     # TP/SL ratios: must be in decimal form, reasonable ranges
     takeProfitRatio: confloat(ge=-1.0, le=1.0) = Field(
         ...,

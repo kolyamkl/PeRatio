@@ -1,10 +1,13 @@
 # CRITICAL: Exclude large directories first
 node_modules/
 **/node_modules/
+../node_modules/
 backend/.venv/
 backend/venv/
 .venv/
 venv/
+**/.venv/
+**/venv/
 
 # Build outputs
 dist/

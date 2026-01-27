@@ -26,12 +26,13 @@ interface StickyConfirmProps {
   disabled?: boolean
   tradeId?: string
   tradeData?: TradeData
+  walletAddress?: string
 }
 
 // Backend URL - uses env var in production, empty for dev (Vite proxy)
 const backendUrl = import.meta.env.VITE_BACKEND_URL || ''
 
-export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyConfirmProps) {
+export function StickyConfirm({ disabled = false, tradeId, tradeData, walletAddress }: StickyConfirmProps) {
   const [state, setState] = useState<ConfirmState>('idle')
   const [ripple, setRipple] = useState<{ x: number; y: number } | null>(null)
   const [showConfetti, setShowConfetti] = useState(false)
@@ -72,8 +73,14 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyCo
         // Call real execute API
         const apiUrl = `${backendUrl}/api/trades/${tradeId}/execute`
         
+        // Validate wallet address is provided - REQUIRED (no hardcoded fallback)
+        if (!walletAddress) {
+          throw new Error('Please connect your wallet to execute trades')
+        }
+        
         const requestBody = {
           pair: tradeData.pair,
+          walletAddress: walletAddress,
           takeProfitRatio: tradeData.takeProfitRatio,
           stopLossRatio: tradeData.stopLossRatio,
           longBasket: tradeData.longBasket || [],
@@ -83,6 +90,7 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyCo
         console.log('[StickyConfirm] 📤 REQUEST DETAILS:')
         console.log('[StickyConfirm]   URL:', apiUrl)
         console.log('[StickyConfirm]   Method: POST')
+        console.log('[StickyConfirm]   Wallet:', walletAddress)
         console.log('[StickyConfirm]   Body:', JSON.stringify(requestBody, null, 2))
         
         const res = await fetch(apiUrl, {
@@ -153,19 +161,31 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData }: StickyCo
         showToast('Trade submitted (demo)', 'success')
       }
     } catch (err: unknown) {
-      const error = err as Error
       console.error('[StickyConfirm] ❌ EXECUTION FAILED')
-      console.error('[StickyConfirm]   Error type:', error.constructor.name)
-      console.error('[StickyConfirm]   Error message:', error.message)
-      console.error('[StickyConfirm]   Error stack:', error.stack)
+      console.error('[StickyConfirm]   Error:', err)
+      
       setState('idle')
       try { hapticFeedback('notification', 'error') } catch {}
       
+      // Extract error message properly - handle all error types
+      let displayMessage = 'Trade failed'
+      
+      if (err instanceof Error) {
+        displayMessage = err.message || 'Trade failed'
+        console.error('[StickyConfirm]   Error message:', err.message)
+        console.error('[StickyConfirm]   Error stack:', err.stack)
+      } else if (typeof err === 'string') {
+        displayMessage = err
+      } else if (err && typeof err === 'object' && 'message' in err) {
+        displayMessage = String((err as any).message)
+      }
+      
       // Sanitize error message - don't show raw HTML/code to user
-      let displayMessage = error.message || 'Trade failed'
       if (displayMessage.length > 100 || displayMessage.includes('<') || displayMessage.includes('import ')) {
         displayMessage = 'Trade execution failed. Please try again.'
       }
+      
+      console.error('[StickyConfirm]   Display message:', displayMessage)
       showToast(displayMessage, 'error')
     }
   }
