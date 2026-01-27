@@ -20,7 +20,9 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-from config import get_settings
+from core.config import get_settings
+from core.database import engine, get_session, init_db
+from core.models import NotificationSetting, Trade
 
 # Security: Import security middleware and utilities
 from security import (
@@ -32,12 +34,14 @@ from security import (
     validate_numeric_range
 )
 
-# LLM imports removed - using Agent Pear signals only
-from database import engine, get_session, init_db
-from models import NotificationSetting, Trade
-from pear_api import fetch_open_positions, parse_positions_for_notification
-from pear_agent_api import fetch_pear_agent_signal
-from pear_monitor import start_monitor as start_pear_monitor, stop_monitor as stop_pear_monitor
+# Pear Protocol integration
+from pear import (
+    fetch_open_positions,
+    parse_positions_for_notification,
+    fetch_pear_agent_signal,
+    start_monitor as start_pear_monitor,
+    stop_monitor as stop_pear_monitor,
+)
 
 # Path to latest Pear signal from Telegram monitor
 LATEST_PEAR_SIGNAL_FILE = os.path.join(os.path.dirname(__file__), "latest_pear_signal.json")
@@ -61,7 +65,8 @@ def get_latest_pear_telegram_signal() -> Optional[Dict[str, Any]]:
     except Exception as e:
         logging.getLogger(__name__).error(f"Error reading pear signal file: {e}")
         return None
-from schemas import (
+
+from core.schemas import (
     ExecuteTradeRequest,
     GenerateTradeRequest,
     GenerateTradeResponse,

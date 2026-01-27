@@ -6,7 +6,7 @@ import re
 from pydantic import BaseModel, Field, field_validator, constr, confloat, conint
 
 # Security: Import sanitization utilities
-from security import sanitize_string, sanitize_user_id, sanitize_symbol, validate_numeric_range
+from security.security import sanitize_string, sanitize_user_id, sanitize_symbol, validate_numeric_range
 
 
 class BasketAssetSchema(BaseModel):

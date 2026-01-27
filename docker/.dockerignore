@@ -1,12 +1,10 @@
 # CRITICAL: Exclude large directories first
-.venv/
-**/.venv/
-venv/
-**/venv/
 node_modules/
 **/node_modules/
 backend/.venv/
 backend/venv/
+.venv/
+venv/
 
 # Build outputs
 dist/
@@ -59,26 +57,18 @@ temp/
 *.db-journal
 *.sqlite
 *.sqlite3
+backend/*.db
 
-# Documentation (not needed in container)
-docs/
+# Documentation
 *.md
 !README.md
-
-# Docker files (not needed in container)
-docker/
-Dockerfile
-docker-compose*.yml
+docs/
 
 # Scripts (not needed in container)
 scripts/
 
-# Backend files (not needed in frontend container)
-backend/
-
 # Pear signal cache
-latest_pear_signal.json
-pear_signals_history.json
+backend/latest_pear_signal.json
 
 # npm
 npm-debug.log
