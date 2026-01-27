@@ -105,7 +105,7 @@ class TradeSchema(BaseModel):
         example="Strong bullish divergence detected"
     )
     # Status: enum-like validation
-    status: constr(pattern=r'^(PENDING|EXECUTED|CANCELLED|EXPIRED)$') = Field(
+    status: constr(pattern=r'^(PENDING|EXECUTED|CANCELLED|EXPIRED|OPEN)$') = Field(
         ...,
         description="Trade status",
         example="PENDING"
