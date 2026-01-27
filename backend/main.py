@@ -1225,8 +1225,8 @@ def execute_trade(
     logger.info(f"[EXECUTE] Updated params: LONG {trade.pair_long_symbol} ${trade.pair_long_notional} {trade.pair_long_leverage}x | SHORT {trade.pair_short_symbol} ${trade.pair_short_notional} {trade.pair_short_leverage}x")
     logger.info(f"[EXECUTE] TP/SL from user: takeProfitRatio={payload.takeProfitRatio} ({payload.takeProfitRatio * 100 if payload.takeProfitRatio else 0}%), stopLossRatio={payload.stopLossRatio} ({abs(payload.stopLossRatio * 100) if payload.stopLossRatio else 0}%)")
 
-    # Execute via Pear Protocol API
-    if settings.pear_access_token and settings.pear_api_url:
+    # Execute via Pear Protocol API using USER's access token (not server token)
+    if payload.pearAccessToken and settings.pear_api_url:
         try:
             # ONLY use connected wallet from payload - NO hardcoded fallback
             user_wallet = payload.walletAddress
@@ -1332,7 +1332,7 @@ def execute_trade(
                 f'{settings.pear_api_url}/positions',
                 json=position_data,
                 headers={
-                    'Authorization': f'Bearer {settings.pear_access_token}',
+                    'Authorization': f'Bearer {payload.pearAccessToken}',
                     'Content-Type': 'application/json'
                 },
                 timeout=30

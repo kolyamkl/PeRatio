@@ -8,6 +8,7 @@ backend/venv/
 venv/
 **/.venv/
 **/venv/
+backend/pear-sdk/
 
 # Build outputs
 dist/

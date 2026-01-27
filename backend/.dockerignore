@@ -4,6 +4,9 @@ venv/
 env/
 ENV/
 
+# Exclude pear-sdk (large, not needed - backend uses direct HTTP calls)
+pear-sdk/
+
 # Python
 __pycache__/
 **/__pycache__/

@@ -87,30 +87,38 @@ async function getEIP712Message(address: string): Promise<any> {
 }
 
 /**
- * Sign EIP-712 message using MetaMask or WalletConnect
+ * Sign EIP-712 message using wagmi's signTypedData (handles chain correctly)
+ * This is called from walletProvider with the signTypedDataAsync function
  */
-async function signEIP712Message(
+export async function signEIP712Message(
   address: string,
   eipData: any,
-  provider: any
+  signTypedDataAsync: (params: any) => Promise<string>
 ): Promise<string> {
-  // Remove EIP712Domain from types (it's implicit)
+  console.log('[PearAuth] EIP-712 data received:', JSON.stringify(eipData, null, 2))
+  
+  // Remove EIP712Domain from types (wagmi handles it)
   const { EIP712Domain, ...types } = eipData.types
   
-  const typedData = {
-    domain: eipData.domain,
-    types: types,
-    primaryType: eipData.primaryType,
-    message: eipData.message,
+  console.log('[PearAuth] Signing with wagmi signTypedDataAsync...')
+  
+  try {
+    // Use wagmi's signTypedDataAsync which handles chain correctly
+    const signature = await signTypedDataAsync({
+      domain: eipData.domain,
+      types: types,
+      primaryType: eipData.primaryType,
+      message: eipData.message,
+    })
+    
+    console.log('[PearAuth] Signature received:', signature?.substring(0, 20) + '...')
+    return signature
+  } catch (error: any) {
+    console.error('[PearAuth] Signing error:', error)
+    console.error('[PearAuth] Error code:', error?.code)
+    console.error('[PearAuth] Error message:', error?.message)
+    throw error
   }
-  
-  // Use eth_signTypedData_v4 for EIP-712 signing
-  const signature = await provider.request({
-    method: 'eth_signTypedData_v4',
-    params: [address, JSON.stringify(typedData)],
-  })
-  
-  return signature
 }
 
 /**
@@ -118,7 +126,7 @@ async function signEIP712Message(
  */
 export async function authenticateWithPear(
   address: string,
-  provider: any
+  signTypedDataAsync: (params: any) => Promise<string>
 ): Promise<{ accessToken: string; expiresIn: number }> {
   console.log('[PearAuth] 🔐 Starting authentication for:', address)
   
@@ -126,25 +134,36 @@ export async function authenticateWithPear(
   console.log('[PearAuth] 📝 Getting EIP-712 message...')
   const eipData = await getEIP712Message(address)
   
-  // Step 2: Sign the message
+  // Step 2: Sign the message using wagmi's signTypedDataAsync
   console.log('[PearAuth] ✍️ Requesting signature...')
-  const signature = await signEIP712Message(address, eipData, provider)
+  const signature = await signEIP712Message(address, eipData, signTypedDataAsync)
   console.log('[PearAuth] ✅ Message signed')
   
   // Step 3: Login with signature
+  // Use the address from the EIP-712 message (Pear lowercases it)
+  const loginAddress = eipData.message.address || address.toLowerCase()
+  
   console.log('[PearAuth] 🔑 Authenticating with Pear Protocol...')
+  console.log('[PearAuth] Login address:', loginAddress)
+  console.log('[PearAuth] Timestamp:', eipData.message.timestamp)
+  console.log('[PearAuth] Signature:', signature.substring(0, 30) + '...')
+  
+  const loginPayload = {
+    method: 'eip712',
+    address: loginAddress,
+    clientId: CLIENT_ID,
+    details: {
+      signature: signature,
+      timestamp: eipData.message.timestamp,
+    },
+  }
+  
+  console.log('[PearAuth] Login payload:', JSON.stringify(loginPayload, null, 2))
+  
   const loginResponse = await fetch(`${PEAR_API_URL}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      method: 'eip712',
-      address: address,
-      clientId: CLIENT_ID,
-      details: {
-        signature: signature,
-        timestamp: eipData.message.timestamp,
-      },
-    }),
+    body: JSON.stringify(loginPayload),
   })
   
   if (!loginResponse.ok) {

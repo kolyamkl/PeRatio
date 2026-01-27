@@ -219,6 +219,12 @@ class ExecuteTradeRequest(BaseModel):
         min_length=42,
         max_length=42
     )
+    pearAccessToken: str = Field(
+        ...,
+        description="User's Pear Protocol access token (obtained via EIP-712 signing)",
+        min_length=100,
+        max_length=2000
+    )
     # TP/SL ratios: must be in decimal form, reasonable ranges
     takeProfitRatio: confloat(ge=-1.0, le=1.0) = Field(
         ...,

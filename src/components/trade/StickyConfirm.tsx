@@ -78,9 +78,16 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData, walletAddr
           throw new Error('Please connect your wallet to execute trades')
         }
         
+        // Get user's Pear access token from localStorage (set during wallet authentication)
+        const pearAccessToken = localStorage.getItem('pear_access_token')
+        if (!pearAccessToken) {
+          throw new Error('Please authenticate with Pear Protocol to execute trades')
+        }
+        
         const requestBody = {
           pair: tradeData.pair,
           walletAddress: walletAddress,
+          pearAccessToken: pearAccessToken,
           takeProfitRatio: tradeData.takeProfitRatio,
           stopLossRatio: tradeData.stopLossRatio,
           longBasket: tradeData.longBasket || [],

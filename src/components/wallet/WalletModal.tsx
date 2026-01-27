@@ -28,12 +28,19 @@ export function WalletModal({ isOpen, onClose }: WalletModalProps) {
     hapticFeedback('impact', 'medium')
     
     try {
-      // Open Web3Modal - it will show QR code automatically
-      await open()
+      // Open Web3Modal with QR code view directly
+      // Using 'ConnectingWalletConnect' view to show QR code
+      await open({ view: 'ConnectingWalletConnect' })
       
-      console.log('[WalletModal] ✅ Web3Modal opened')
+      console.log('[WalletModal] ✅ Web3Modal opened with QR view')
     } catch (error) {
       console.error('[WalletModal] ❌ Failed to open Web3Modal:', error)
+      // Fallback to default view if specific view fails
+      try {
+        await open()
+      } catch (fallbackError) {
+        console.error('[WalletModal] ❌ Fallback also failed:', fallbackError)
+      }
       hapticFeedback('notification', 'error')
     }
   }

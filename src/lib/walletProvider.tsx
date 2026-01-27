@@ -4,7 +4,8 @@
  */
 
 import { createContext, useContext, ReactNode, useEffect, useState, useCallback } from 'react'
-import { useAccount, useDisconnect } from 'wagmi'
+import { useAccount, useDisconnect, useSwitchChain, useSignTypedData } from 'wagmi'
+import { arbitrum } from 'wagmi/chains'
 import { getDeviceInfo } from './deviceDetection'
 import {
   authenticateWithPear,
@@ -58,6 +59,7 @@ interface WalletContextType extends WalletState {
   
   // Pear Protocol methods
   authenticatePear: () => Promise<boolean>
+  authenticateWithPearManual: () => Promise<void>
   setupAgentWallet: () => Promise<AgentWalletInfo | null>
   refreshPositions: () => Promise<void>
   executeTrade: (params: TradeExecutionParams) => Promise<any>
@@ -154,10 +156,12 @@ export function WalletProvider({ children }: WalletProviderProps) {
   const [state, setState] = useState<WalletState>(defaultState)
   
   // Wagmi hooks for Web3Modal integration
-  const { address: wagmiAddress, isConnected: wagmiIsConnected, connector } = useAccount()
+  const { address: wagmiAddress, isConnected: wagmiIsConnected, connector, chainId: wagmiChainId } = useAccount()
   const { disconnect: wagmiDisconnect } = useDisconnect()
+  const { switchChainAsync } = useSwitchChain()
+  const { signTypedDataAsync } = useSignTypedData()
 
-  // Sync Wagmi/Web3Modal state with WalletProvider state
+  // Sync Wagmi/Web3Modal state with WalletProvider state and auto-authenticate with Pear
   useEffect(() => {
     if (wagmiIsConnected && wagmiAddress) {
       console.log('[WalletProvider] Web3Modal connected:', wagmiAddress)
@@ -176,12 +180,85 @@ export function WalletProvider({ children }: WalletProviderProps) {
       fetchUSDCBalance(wagmiAddress).then(balance => {
         setState(prev => ({ ...prev, balance, balanceLoading: false }))
       })
+      
+      // Auto-authenticate with Pear Protocol after wallet connection
+      const authenticateWithPearProtocol = async () => {
+        // Check if already authenticated
+        const storedAuth = getStoredAuthState()
+        if (storedAuth.isAuthenticated && storedAuth.accessToken) {
+          console.log('[WalletProvider] Already authenticated with Pear, token:', storedAuth.accessToken?.substring(0, 30) + '...')
+          setState(prev => ({
+            ...prev,
+            isPearAuthenticated: true,
+            pearAccessToken: storedAuth.accessToken,
+            agentWallet: storedAuth.agentWallet,
+          }))
+          return
+        }
+        
+        console.log('[WalletProvider] 🔐 Starting Pear Protocol authentication...')
+        console.log('[WalletProvider] Wallet address:', wagmiAddress)
+        console.log('[WalletProvider] Connector:', connector?.name || 'unknown')
+        setState(prev => ({ ...prev, isPearAuthenticating: true }))
+        
+        try {
+          // Get provider from connector
+          let provider: any = null
+          if (connector) {
+            console.log('[WalletProvider] Getting provider from connector...')
+            provider = await connector.getProvider()
+            console.log('[WalletProvider] Provider from connector:', provider ? 'obtained' : 'null')
+          }
+          if (!provider) {
+            console.log('[WalletProvider] Falling back to window.ethereum')
+            provider = (window as any).ethereum
+          }
+          
+          if (!provider) {
+            console.error('[WalletProvider] No provider available for Pear auth')
+            setState(prev => ({ ...prev, isPearAuthenticating: false }))
+            return
+          }
+          
+          console.log('[WalletProvider] Provider ready, calling authenticateWithPear...')
+          
+          // Authenticate with Pear Protocol (EIP-712 signing)
+          const authResult = await authenticateWithPear(wagmiAddress, provider)
+          
+          console.log('[WalletProvider] ✅ Pear authentication successful!')
+          console.log('[WalletProvider] Access token:', authResult.accessToken?.substring(0, 30) + '...')
+          setState(prev => ({
+            ...prev,
+            isPearAuthenticated: true,
+            isPearAuthenticating: false,
+            pearAccessToken: authResult.accessToken,
+          }))
+          
+        } catch (error: any) {
+          console.error('[WalletProvider] ❌ Pear authentication failed:', error)
+          console.error('[WalletProvider] Error name:', error?.name)
+          console.error('[WalletProvider] Error message:', error?.message)
+          console.error('[WalletProvider] Error stack:', error?.stack)
+          setState(prev => ({ 
+            ...prev, 
+            isPearAuthenticating: false,
+            error: `Pear auth failed: ${error.message}`
+          }))
+        }
+      }
+      
+      // Longer delay to ensure wallet connection and chain switch is fully established
+      // User may need to approve network switch in their wallet
+      setTimeout(() => {
+        authenticateWithPearProtocol()
+      }, 3000)
+      
     } else if (!wagmiIsConnected && state.isConnected) {
       console.log('[WalletProvider] Web3Modal disconnected')
       setState(defaultState)
       clearAuthState()
     }
-  }, [wagmiIsConnected, wagmiAddress])
+  }, [wagmiIsConnected, wagmiAddress, connector])
 
   // Check for existing auth on mount
   useEffect(() => {
@@ -534,6 +611,76 @@ export function WalletProvider({ children }: WalletProviderProps) {
     return buildApprovalMessage(state.agentWallet).url
   }, [state.agentWallet])
 
+  /**
+   * Manual Pear authentication - for retry after network switch
+   */
+  const authenticateWithPearManual = useCallback(async (): Promise<void> => {
+    if (!wagmiAddress) {
+      console.error('[WalletProvider] Cannot authenticate - no wallet connected')
+      return
+    }
+    
+    console.log('[WalletProvider] 🔐 Manual Pear authentication triggered...')
+    console.log('[WalletProvider] Current wagmi chainId:', wagmiChainId)
+    console.log('[WalletProvider] Arbitrum chainId:', arbitrum.id)
+    setState(prev => ({ ...prev, isPearAuthenticating: true, error: null }))
+    
+    try {
+      // Switch to Arbitrum first if not already on it
+      if (wagmiChainId !== arbitrum.id) {
+        console.log('[WalletProvider] 🔄 Switching to Arbitrum (42161)...')
+        try {
+          await switchChainAsync({ chainId: arbitrum.id })
+          console.log('[WalletProvider] ✅ Switched to Arbitrum')
+          // Wait for the switch to propagate
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        } catch (switchError: any) {
+          console.error('[WalletProvider] Chain switch error:', switchError)
+          if (switchError.code === 4001 || switchError.message?.includes('rejected')) {
+            throw new Error('Please approve the network switch to Arbitrum in your wallet')
+          }
+        }
+      }
+      
+      // Use wagmi's signTypedDataAsync which handles chain correctly
+      console.log('[WalletProvider] Using wagmi signTypedDataAsync for signing...')
+      const authResult = await authenticateWithPear(wagmiAddress, signTypedDataAsync)
+      
+      console.log('[WalletProvider] ✅ Manual Pear authentication successful!')
+      
+      // Check/create agent wallet after authentication
+      console.log('[WalletProvider] 🔍 Checking agent wallet status...')
+      let agentWalletInfo = await checkAgentWallet(authResult.accessToken)
+      
+      if (!agentWalletInfo) {
+        console.log('[WalletProvider] 📝 Creating agent wallet...')
+        agentWalletInfo = await createAgentWallet(authResult.accessToken)
+        console.log('[WalletProvider] ✅ Agent wallet created:', agentWalletInfo.agentWalletAddress)
+        console.log('[WalletProvider] ⚠️ User needs to approve agent wallet on Hyperliquid')
+      } else {
+        console.log('[WalletProvider] ✅ Agent wallet exists:', agentWalletInfo.agentWalletAddress)
+      }
+      
+      setState(prev => ({
+        ...prev,
+        isPearAuthenticated: true,
+        isPearAuthenticating: false,
+        pearAccessToken: authResult.accessToken,
+        agentWallet: agentWalletInfo?.agentWalletAddress || null,
+        needsApproval: !agentWalletInfo?.agentWalletAddress,
+        error: null,
+      }))
+      
+    } catch (error: any) {
+      console.error('[WalletProvider] ❌ Manual Pear authentication failed:', error)
+      setState(prev => ({ 
+        ...prev, 
+        isPearAuthenticating: false,
+        error: error.message || 'Authentication failed'
+      }))
+    }
+  }, [wagmiAddress, wagmiChainId, switchChainAsync, signTypedDataAsync])
+
   const contextValue: WalletContextType = {
     ...state,
     connect,
@@ -543,6 +690,7 @@ export function WalletProvider({ children }: WalletProviderProps) {
       console.log('[Wallet] Opening wallet modal')
     },
     authenticatePear,
+    authenticateWithPearManual,
     setupAgentWallet,
     refreshPositions,
     executeTrade,

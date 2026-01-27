@@ -5,13 +5,13 @@
  */
 
 import { useState } from 'react'
-import { Wallet } from 'lucide-react'
+import { Wallet, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react'
 import { useWallet } from '../../lib/walletProvider'
 import { WalletModal } from './WalletModal'
 import { hapticFeedback } from '../../lib/telegram'
 
 export function WalletConnectionCard() {
-  const { isConnected, displayAddress, balance, balanceLoading, disconnect } = useWallet()
+  const { isConnected, displayAddress, balance, balanceLoading, disconnect, isPearAuthenticated, isPearAuthenticating, authenticateWithPearManual } = useWallet()
   const [showModal, setShowModal] = useState(false)
 
   const handleConnect = () => {
@@ -99,6 +99,72 @@ export function WalletConnectionCard() {
           )}
         </div>
       </div>
+
+      {/* Pear Authentication Status */}
+      <div className="mt-4 p-3 bg-bg-secondary/30 rounded-xl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {isPearAuthenticated ? (
+              <CheckCircle className="w-4 h-4 text-green-500" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-orange-500" />
+            )}
+            <span className="text-xs text-text-muted">
+              Pear Protocol: {isPearAuthenticated ? 'Authenticated' : 'Not Authenticated'}
+            </span>
+          </div>
+          {!isPearAuthenticated && (
+            <button
+              onClick={() => {
+                hapticFeedback('impact', 'light')
+                authenticateWithPearManual?.()
+              }}
+              disabled={isPearAuthenticating}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-primary/10 text-accent-primary hover:bg-accent-primary/20 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {isPearAuthenticating ? (
+                <>
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  Authenticating...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3 h-3" />
+                  Authenticate
+                </>
+              )}
+            </button>
+          )}
+        </div>
+        {!isPearAuthenticated && !isPearAuthenticating && (
+          <p className="text-xs text-text-muted mt-2">
+            Switch to Arbitrum One in your wallet, then click Authenticate
+          </p>
+        )}
+      </div>
+      
+      {/* Agent Wallet Approval Notice */}
+      {isPearAuthenticated && (
+        <div className="mt-3 p-3 bg-orange-500/10 rounded-xl border border-orange-500/20">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="text-xs font-medium text-orange-500">Agent Wallet Setup Required</p>
+              <p className="text-xs text-text-muted mt-1">
+                To execute trades, you must approve Pear Protocol's agent wallet on Hyperliquid.
+              </p>
+              <a
+                href="https://app.hyperliquid.xyz/api-wallet"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-accent-primary hover:underline"
+              >
+                Open Hyperliquid API Wallet Page →
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Disconnect button */}
       <button
