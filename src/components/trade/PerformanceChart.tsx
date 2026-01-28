@@ -77,6 +77,28 @@ export function PerformanceChart({ isOpen, onClose, trades = [], apiChartData }:
     }
   }, [isOpen, timeRange])
 
+  // Downsample data to max points for performance
+  const MAX_CHART_POINTS = 50
+
+  const downsampleData = (points: DataPoint[]): DataPoint[] => {
+    if (points.length <= MAX_CHART_POINTS) return points
+    
+    // Keep first and last points, sample evenly in between
+    const result: DataPoint[] = [points[0]]
+    const step = (points.length - 2) / (MAX_CHART_POINTS - 2)
+    
+    for (let i = 1; i < MAX_CHART_POINTS - 1; i++) {
+      const index = Math.round(i * step)
+      if (index < points.length - 1) {
+        result.push(points[index])
+      }
+    }
+    
+    result.push(points[points.length - 1])
+    return result
+  }
+
+  // Use API chart data (full DB) and filter by time range
   const chartData = useMemo(() => {
     const now = new Date()
     let startDate: Date
@@ -96,9 +118,56 @@ export function PerformanceChart({ isOpen, onClose, trades = [], apiChartData }:
         break
       case 'ALL':
       default:
-        startDate = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
+        startDate = new Date(0) // All time - no limit
     }
 
+    // Use API data if available (full database)
+    if (apiChartData?.data_points && apiChartData.data_points.length > 0) {
+      const filteredPoints = apiChartData.data_points.filter(point => {
+        const pointDate = new Date(point.date)
+        return pointDate >= startDate && pointDate <= now
+      })
+
+      // Recalculate cumulative for filtered range
+      const dataPoints: DataPoint[] = []
+      let cumulative = 0
+
+      // Add starting point
+      dataPoints.push({
+        date: startDate,
+        pnl: 0,
+        cumulative: 0,
+        label: formatDateLabel(startDate, timeRange),
+      })
+
+      filteredPoints.forEach(point => {
+        cumulative += point.pnl
+        dataPoints.push({
+          date: new Date(point.date),
+          pnl: point.pnl,
+          cumulative,
+          label: formatDateLabel(new Date(point.date), timeRange),
+        })
+      })
+
+      // Add "Now" point if needed
+      if (dataPoints.length > 0) {
+        const lastPoint = dataPoints[dataPoints.length - 1]
+        if (lastPoint.date < now) {
+          dataPoints.push({
+            date: now,
+            pnl: 0,
+            cumulative: lastPoint.cumulative,
+            label: 'Now',
+          })
+        }
+      }
+
+      // Downsample for performance
+      return downsampleData(dataPoints)
+    }
+
+    // Fallback to trades prop if no API data
     const filteredTrades = trades.filter(trade => {
       const tradeDate = new Date(trade.openedAt)
       return tradeDate >= startDate && tradeDate <= now
@@ -140,32 +209,58 @@ export function PerformanceChart({ isOpen, onClose, trades = [], apiChartData }:
       }
     }
 
-    return dataPoints
-  }, [timeRange, trades])
+    // Downsample for performance
+    return downsampleData(dataPoints)
+  }, [timeRange, trades, apiChartData])
 
+  // Calculate stats from API data or trades
   const stats = useMemo(() => {
-    const totalPnl = chartData.length > 0 ? chartData[chartData.length - 1].cumulative : 0
-    const filteredTrades = trades.filter(t => {
-      const now = new Date()
-      let startDate: Date
-      switch (timeRange) {
-        case '1D':
-          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000)
-          break
-        case '1W':
-          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-          break
-        case '1M':
-          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-          break
-        case '3M':
-          startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
-          break
-        default:
-          startDate = new Date(0)
+    const now = new Date()
+    let startDate: Date
+    switch (timeRange) {
+      case '1D':
+        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+        break
+      case '1W':
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        break
+      case '1M':
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+        break
+      case '3M':
+        startDate = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000)
+        break
+      default:
+        startDate = new Date(0)
+    }
+
+    // Use API data if available
+    if (apiChartData?.data_points && apiChartData.data_points.length > 0) {
+      const filteredPoints = apiChartData.data_points.filter(point => {
+        const pointDate = new Date(point.date)
+        return pointDate >= startDate && pointDate <= now
+      })
+
+      const totalPnl = filteredPoints.reduce((sum, p) => sum + p.pnl, 0)
+      const winningTrades = filteredPoints.filter(p => p.result === 'profit').length
+      const losingTrades = filteredPoints.filter(p => p.result === 'loss').length
+      const totalTrades = filteredPoints.length
+      const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0
+      const avgPnl = totalTrades > 0 ? totalPnl / totalTrades : 0
+
+      return {
+        totalPnl,
+        totalTrades,
+        winningTrades,
+        losingTrades,
+        winRate,
+        avgPnl,
       }
-      return new Date(t.openedAt) >= startDate
-    })
+    }
+
+    // Fallback to trades prop
+    const totalPnl = chartData.length > 0 ? chartData[chartData.length - 1].cumulative : 0
+    const filteredTrades = trades.filter(t => new Date(t.openedAt) >= startDate)
     
     const winningTrades = filteredTrades.filter(t => t.pnlUsd > 0).length
     const losingTrades = filteredTrades.filter(t => t.pnlUsd < 0).length
@@ -180,7 +275,7 @@ export function PerformanceChart({ isOpen, onClose, trades = [], apiChartData }:
       winRate,
       avgPnl,
     }
-  }, [chartData, timeRange, trades])
+  }, [chartData, timeRange, trades, apiChartData])
 
   // Animate the P&L number
   useEffect(() => {
@@ -520,32 +615,18 @@ export function PerformanceChart({ isOpen, onClose, trades = [], apiChartData }:
                 </>
               )}
 
-              {/* Animated data points */}
-              {chartData.map((point, i) => (
+              {/* Data points - only show first, last, and a few key points for performance */}
+              {showPoints && [0, Math.floor(chartData.length / 2), chartData.length - 1]
+                .filter((idx, i, arr) => arr.indexOf(idx) === i && idx < chartData.length)
+                .map((i) => (
                 <g key={i}>
-                  {/* Pulse ring */}
                   <circle
                     cx={getX(i)}
-                    cy={getY(point.cumulative)}
-                    r={showPoints ? 12 : 0}
-                    fill={lineColor}
-                    opacity={0.2}
-                    style={{
-                      transition: `all 0.5s ease-out ${i * 0.1}s`,
-                    }}
-                  />
-                  {/* Point */}
-                  <circle
-                    cx={getX(i)}
-                    cy={getY(point.cumulative)}
-                    r={showPoints ? 5 : 0}
+                    cy={getY(chartData[i].cumulative)}
+                    r={5}
                     fill={lineColor}
                     stroke="var(--bg-primary)"
                     strokeWidth={2}
-                    filter="url(#glow)"
-                    style={{
-                      transition: `all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) ${i * 0.1}s`,
-                    }}
                   />
                 </g>
               ))}

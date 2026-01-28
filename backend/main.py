@@ -999,7 +999,7 @@ def parse_trade_message(
 @app.get("/api/trades", response_model=List[TradeSchema])
 def get_all_trades(
     user_id: Optional[str] = None,
-    status: Optional[str] = None,
+    trade_status: Optional[str] = None,
     limit: int = 50,
     session: Session = Depends(get_session)
 ) -> Any:
@@ -1014,32 +1014,33 @@ def get_all_trades(
             user_id = sanitize_user_id(user_id)
         except ValueError as e:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=400,
                 detail=f"Invalid user_id: {str(e)}"
             )
     
     # Security: Validate status is one of allowed values
-    if status:
-        allowed_statuses = ["PENDING", "EXECUTED", "CANCELLED", "EXPIRED"]
-        status_upper = status.upper()
+    status_filter = None
+    if trade_status:
+        allowed_statuses = ["PENDING", "EXECUTED", "CANCELLED", "EXPIRED", "CLOSED"]
+        status_upper = trade_status.upper()
         if status_upper not in allowed_statuses:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=400,
                 detail=f"Invalid status. Must be one of: {', '.join(allowed_statuses)}"
             )
-        status = status_upper
+        status_filter = status_upper
     
     # Security: Limit must be reasonable (1-500)
     limit = max(1, min(500, limit))
     
-    logger.info(f"[API] 📋 Fetching trades - user_id={user_id}, status={status}, limit={limit}")
+    logger.info(f"[API] 📋 Fetching trades - user_id={user_id}, status={status_filter}, limit={limit}")
     
     query = select(Trade)
     
     if user_id:
         query = query.where(Trade.user_id == user_id)
-    if status:
-        query = query.where(Trade.status == status)
+    if status_filter:
+        query = query.where(Trade.status == status_filter)
     
     query = query.order_by(Trade.created_at.desc()).limit(limit)
     trades = session.exec(query).all()
@@ -1792,24 +1793,27 @@ async def get_pear_signal_history(
 
 @app.get("/api/pear-signals/chart-data")
 async def get_pear_signal_chart_data(
-    days: int = 30,
+    days: Optional[int] = None,
     session: Session = Depends(get_session)
 ) -> Dict[str, Any]:
     """
     Get chart data for performance visualization.
     Returns cumulative P&L data points for the chart.
+    If days is None or 0, returns ALL data from the database.
     """
     from datetime import timedelta
     
-    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    # Build query - if days is specified, filter by date; otherwise get ALL
+    query = select(AgentPearSignal).where(AgentPearSignal.signal_type == "CLOSE")
     
-    # Get all CLOSE signals within the time range (these have P&L data)
-    close_signals = session.exec(
-        select(AgentPearSignal)
-        .where(AgentPearSignal.signal_type == "CLOSE")
-        .where(AgentPearSignal.signal_date >= cutoff_date)
-        .order_by(AgentPearSignal.signal_date.asc())
-    ).all()
+    if days and days > 0:
+        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        query = query.where(AgentPearSignal.signal_date >= cutoff_date)
+    
+    query = query.order_by(AgentPearSignal.signal_date.asc())
+    
+    # Get all CLOSE signals (these have P&L data)
+    close_signals = session.exec(query).all()
     
     # Build chart data points
     data_points = []

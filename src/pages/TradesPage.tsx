@@ -5,7 +5,9 @@ import {
   Inbox, 
   Search, 
   BarChart3,
-  RefreshCw
+  RefreshCw,
+  Users,
+  User
 } from 'lucide-react'
 import { TopBar } from '../components/layout/TopBar'
 import { SegmentedSwitch } from '../components/ui/SegmentedSwitch'
@@ -191,6 +193,8 @@ function convertApiTradeToDisplay(apiTrade: ApiTrade): DisplayTrade {
   }
 }
 
+type DataSource = 'personal' | 'agentpear'
+
 export function TradesPage() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<TabValue>('Closed')
@@ -198,9 +202,18 @@ export function TradesPage() {
   const [showChart, setShowChart] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [closedTrades, setClosedTrades] = useState<DisplayTrade[]>([])
-  const [openTrades, setOpenTrades] = useState<DisplayTrade[]>([])
-  const [chartData, setChartData] = useState<any>(null)
+  
+  // Data source toggle - affects BOTH trades list AND chart
+  const [dataSource, setDataSource] = useState<DataSource>('agentpear')
+  
+  // Agent Pear data
+  const [pearClosedTrades, setPearClosedTrades] = useState<DisplayTrade[]>([])
+  const [pearOpenTrades, setPearOpenTrades] = useState<DisplayTrade[]>([])
+  const [pearChartData, setPearChartData] = useState<any>(null)
+  
+  // User's personal data
+  const [userClosedTrades, setUserClosedTrades] = useState<DisplayTrade[]>([])
+  const [userOpenTrades, setUserOpenTrades] = useState<DisplayTrade[]>([])
   
   // Fetch data from database
   const loadTrades = async () => {
@@ -210,29 +223,46 @@ export function TradesPage() {
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
       
-      // Fetch last 30 CLOSED signals from Agent Pear (for history)
-      console.log('[TradesPage] 📊 Fetching closed signals from Agent Pear...')
-      const closedResponse = await fetch(`${backendUrl}/api/pear-signals/history?limit=30&signal_type=CLOSE`)
-      if (closedResponse.ok) {
-        const closedSignals: PearSignal[] = await closedResponse.json()
-        console.log('[TradesPage] ✅ Received', closedSignals.length, 'closed signals')
-        setClosedTrades(closedSignals.map(convertPearSignalToDisplay))
+      // === AGENT PEAR DATA ===
+      // Fetch last 30 CLOSED signals from Agent Pear
+      console.log('[TradesPage] 📊 Fetching Agent Pear closed signals...')
+      const pearClosedResponse = await fetch(`${backendUrl}/api/pear-signals/history?limit=30&signal_type=CLOSE`)
+      if (pearClosedResponse.ok) {
+        const closedSignals: PearSignal[] = await pearClosedResponse.json()
+        console.log('[TradesPage] ✅ Received', closedSignals.length, 'Agent Pear closed signals')
+        setPearClosedTrades(closedSignals.map(convertPearSignalToDisplay))
       }
       
-      // Fetch USER's open positions (from trades table, status=EXECUTED)
-      console.log('[TradesPage] 📊 Fetching user open positions...')
-      const userTrades = await fetchTrades(undefined, 'EXECUTED')
-      console.log('[TradesPage] ✅ Received', userTrades.length, 'user open positions')
-      setOpenTrades(userTrades.map(convertApiTradeToDisplay))
+      // Fetch OPEN signals from Agent Pear
+      console.log('[TradesPage] 📊 Fetching Agent Pear open signals...')
+      const pearOpenResponse = await fetch(`${backendUrl}/api/pear-signals/history?limit=30&signal_type=OPEN`)
+      if (pearOpenResponse.ok) {
+        const openSignals: PearSignal[] = await pearOpenResponse.json()
+        console.log('[TradesPage] ✅ Received', openSignals.length, 'Agent Pear open signals')
+        setPearOpenTrades(openSignals.map(convertPearSignalToDisplay))
+      }
       
-      // Fetch chart data from full database
-      console.log('[TradesPage] 📊 Fetching chart data...')
-      const chartResponse = await fetch(`${backendUrl}/api/pear-signals/chart-data?days=365`)
+      // Fetch Agent Pear chart data (ALL data)
+      console.log('[TradesPage] 📊 Fetching Agent Pear chart data...')
+      const chartResponse = await fetch(`${backendUrl}/api/pear-signals/chart-data`)
       if (chartResponse.ok) {
         const data = await chartResponse.json()
-        setChartData(data)
-        console.log('[TradesPage] ✅ Chart data loaded:', data.stats)
+        setPearChartData(data)
+        console.log('[TradesPage] ✅ Agent Pear chart data loaded:', data.stats)
       }
+      
+      // === USER'S PERSONAL DATA ===
+      // Fetch USER's open positions (from trades table, status=EXECUTED)
+      console.log('[TradesPage] 📊 Fetching user open positions...')
+      const userOpenTrades = await fetchTrades(undefined, 'EXECUTED')
+      console.log('[TradesPage] ✅ Received', userOpenTrades.length, 'user open positions')
+      setUserOpenTrades(userOpenTrades.map(convertApiTradeToDisplay))
+      
+      // Fetch USER's closed positions (from trades table, status=CLOSED)
+      console.log('[TradesPage] 📊 Fetching user closed positions...')
+      const userClosedTrades = await fetchTrades(undefined, 'CLOSED')
+      console.log('[TradesPage] ✅ Received', userClosedTrades.length, 'user closed positions')
+      setUserClosedTrades(userClosedTrades.map(convertApiTradeToDisplay))
       
     } catch (err) {
       console.error('[TradesPage] ❌ Error fetching data:', err)
@@ -246,7 +276,11 @@ export function TradesPage() {
     loadTrades()
   }, [])
   
-  // Get trades based on active tab
+  // Get trades based on data source AND active tab
+  const openTrades = dataSource === 'agentpear' ? pearOpenTrades : userOpenTrades
+  const closedTrades = dataSource === 'agentpear' ? pearClosedTrades : userClosedTrades
+  const chartData = dataSource === 'agentpear' ? pearChartData : null
+  
   const filteredTrades = useMemo(() => {
     return activeTab === 'Open' ? openTrades : closedTrades
   }, [activeTab, openTrades, closedTrades])
@@ -374,7 +408,39 @@ export function TradesPage() {
           </div>
         </div>
         
-        {/* Performance chart - uses full DB data */}
+        {/* Data source toggle - ALWAYS visible */}
+        <div className="flex items-center justify-center gap-2">
+          <button
+            onClick={() => {
+              hapticFeedback('selection')
+              setDataSource('personal')
+            }}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              dataSource === 'personal'
+                ? 'bg-accent-primary text-black shadow-lg shadow-accent-primary/30'
+                : 'bg-bg-secondary text-text-muted hover:text-text-primary border border-border'
+            }`}
+          >
+            <User className="w-4 h-4" />
+            My Trades
+          </button>
+          <button
+            onClick={() => {
+              hapticFeedback('selection')
+              setDataSource('agentpear')
+            }}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              dataSource === 'agentpear'
+                ? 'bg-accent-primary text-black shadow-lg shadow-accent-primary/30'
+                : 'bg-bg-secondary text-text-muted hover:text-text-primary border border-border'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            🍐 Agent Pear
+          </button>
+        </div>
+        
+        {/* Performance chart */}
         {showChart && (
           <PerformanceChart 
             isOpen={showChart}

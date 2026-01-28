@@ -39,9 +39,9 @@ class RateLimiter:
     
     def __init__(
         self,
-        requests_per_minute: int = 60,
-        requests_per_hour: int = 1000,
-        burst_size: int = 10
+        requests_per_minute: int = 120,
+        requests_per_hour: int = 2000,
+        burst_size: int = 30
     ):
         """
         Initialize rate limiter with configurable limits.

@@ -121,12 +121,12 @@ export function ParamsCard({
                     if (isNaN(val) || val < 0.1) setLocalStopLoss(0.5)
                     else if (val > 50) setLocalStopLoss(50)
                   }}
-                  className="w-10 text-xl font-bold text-accent-danger bg-transparent text-right outline-none focus:ring-2 focus:ring-accent-danger/30 rounded py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  className="w-14 text-lg font-bold text-accent-danger bg-transparent text-right outline-none focus:ring-2 focus:ring-accent-danger/30 rounded py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   step="0.1"
                   min="0.1"
                   max="50"
                 />
-                <span className="text-xl font-bold text-accent-danger ml-0.5">%</span>
+                <span className="text-lg font-bold text-accent-danger ml-0.5">%</span>
               </div>
               <button
                 onClick={() => handleStopLossChange(0.5)}
@@ -164,12 +164,12 @@ export function ParamsCard({
                     if (isNaN(val) || val < 0.1) setLocalTakeProfit(0.5)
                     else if (val > 100) setLocalTakeProfit(100)
                   }}
-                  className="w-10 text-xl font-bold text-accent-success bg-transparent text-right outline-none focus:ring-2 focus:ring-accent-success/30 rounded py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  className="w-14 text-lg font-bold text-accent-success bg-transparent text-right outline-none focus:ring-2 focus:ring-accent-success/30 rounded py-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   step="0.1"
                   min="0.1"
                   max="100"
                 />
-                <span className="text-xl font-bold text-accent-success ml-0.5">%</span>
+                <span className="text-lg font-bold text-accent-success ml-0.5">%</span>
               </div>
               <button
                 onClick={() => handleTakeProfitChange(0.5)}

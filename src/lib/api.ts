@@ -64,7 +64,7 @@ export interface PerformanceDataPoint {
 export async function fetchTrades(userId?: string, status?: string): Promise<Trade[]> {
   const params = new URLSearchParams()
   if (userId) params.append('user_id', userId)
-  if (status) params.append('status', status)
+  if (status) params.append('trade_status', status)
   
   const url = `${API_BASE}/api/trades${params.toString() ? `?${params}` : ''}`
   const response = await fetch(url)
