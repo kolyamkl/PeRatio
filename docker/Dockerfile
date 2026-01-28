@@ -21,6 +21,10 @@ RUN npm install --prefer-offline --no-audit
 # Copy source code
 COPY . .
 
+# Accept build argument for backend URL
+ARG VITE_BACKEND_URL
+ENV VITE_BACKEND_URL=${VITE_BACKEND_URL}
+
 # Build the application
 RUN npm run build
 

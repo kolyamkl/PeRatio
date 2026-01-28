@@ -96,6 +96,9 @@ export function WalletConnectProvider({ children }: WalletProviderProps) {
         const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
         console.log(`[WalletConnect] 🔗 Linking wallet ${address.slice(0, 10)}... to Telegram user ${telegramUser.userId}`)
         
+        // Get user's Pear access token from localStorage
+        const pearAccessToken = localStorage.getItem('pear_access_token')
+        
         const response = await fetch(`${backendUrl}/api/wallet/link`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -103,7 +106,8 @@ export function WalletConnectProvider({ children }: WalletProviderProps) {
             walletAddress: address,
             telegramUserId: telegramUser.userId,
             telegramChatId: telegramUser.chatId,
-            telegramUsername: telegramUser.username
+            telegramUsername: telegramUser.username,
+            pearAccessToken: pearAccessToken || undefined
           })
         })
         

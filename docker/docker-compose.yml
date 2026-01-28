@@ -50,6 +50,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:8000}
     container_name: tg_trade_frontend
     ports:
       - "80:80"

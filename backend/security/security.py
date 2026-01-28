@@ -174,8 +174,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
     
     async def dispatch(self, request: Request, call_next: Callable):
-        # Skip rate limiting for health checks
-        if request.url.path in ["/health", "/docs", "/openapi.json"]:
+        # Skip rate limiting for health checks and OPTIONS preflight requests
+        if request.url.path in ["/health", "/docs", "/openapi.json"] or request.method == "OPTIONS":
             return await call_next(request)
         
         # Get client identifier (IP + user if available)

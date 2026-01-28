@@ -66,3 +66,5 @@ backend/logs/*.log.*
 *.tmp
 *.bak
 *.backup
+.vercel
+.env*.local

@@ -100,12 +100,15 @@ class NotificationSetting(SQLModel, table=True):
 class WalletUser(SQLModel, table=True):
     """
     Links wallet addresses to Telegram users for notifications.
-    Each wallet can be linked to one Telegram user.
+    Many-to-many: One user can have multiple wallets, one wallet can be used by multiple users.
+    Composite primary key: (wallet_address, telegram_user_id)
     """
-    wallet_address: str = Field(primary_key=True, index=True)  # Ethereum address (lowercase)
+    id: Optional[int] = Field(default=None, primary_key=True)  # Auto-increment ID
+    wallet_address: str = Field(index=True)  # Ethereum address (lowercase)
     telegram_user_id: str = Field(index=True)  # Telegram user ID
     telegram_chat_id: str  # Telegram chat ID for sending messages
     telegram_username: Optional[str] = Field(default=None)  # @username if available
+    pear_access_token: Optional[str] = Field(default=None)  # User's Pear Protocol access token for fetching positions
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 

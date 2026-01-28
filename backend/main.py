@@ -299,16 +299,31 @@ async def handle_stop_trade_callback(update: Update, context: ContextTypes.DEFAU
     logger.info(f"[STOP_TRADE] User requested to stop position: {position_id}")
     
     try:
-        # Close position via Pear Protocol API
-        if settings.pear_access_token and settings.pear_api_url:
-            logger.info(f"[STOP_TRADE] Closing position {position_id} via Pear API...")
+        # Get user's Pear access token from database
+        with Session(engine) as db_session:
+            # Find user's wallet with Pear token
+            user_wallet = db_session.exec(
+                select(WalletUser).where(
+                    WalletUser.telegram_chat_id == str(chat_id),
+                    WalletUser.pear_access_token != None
+                )
+            ).first()
             
-            response = requests.delete(
-                f'{settings.pear_api_url}/positions/{position_id}',
+            access_token = user_wallet.pear_access_token if user_wallet else settings.pear_access_token
+            token_source = "user" if user_wallet and user_wallet.pear_access_token else "server"
+        
+        # Close position via Pear Protocol API
+        if access_token and settings.pear_api_url:
+            logger.info(f"[STOP_TRADE] Closing position {position_id} via Pear API (token: {token_source})...")
+            
+            # Use POST to /positions/{id}/close endpoint with executionType
+            response = requests.post(
+                f'{settings.pear_api_url}/positions/{position_id}/close',
                 headers={
-                    'Authorization': f'Bearer {settings.pear_access_token}',
+                    'Authorization': f'Bearer {access_token}',
                     'Content-Type': 'application/json'
                 },
+                json={"executionType": "MARKET"},  # Required by Pear API
                 timeout=30
             )
             
@@ -464,6 +479,14 @@ logger.info("[SECURITY] ✅ Rate limiting enabled (60/min, 1000/hour)")
 # Security: Add security headers middleware
 app.add_middleware(SecurityHeadersMiddleware)
 logger.info("[SECURITY] ✅ Security headers enabled")
+
+# Request logging middleware - log ALL incoming requests
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"[REQUEST] {request.method} {request.url.path} from {request.client.host if request.client else 'unknown'}")
+    response = await call_next(request)
+    logger.info(f"[RESPONSE] {request.method} {request.url.path} -> {response.status_code}")
+    return response
 
 
 def trade_to_response(trade: Trade) -> TradeSchema:
@@ -1196,6 +1219,104 @@ def get_wallet_info():
     return result
 
 
+class DirectTradeNotifyRequest(BaseModel):
+    """Request to notify about a direct trade execution"""
+    walletAddress: str = PydanticField(..., min_length=42, max_length=42)
+    longAsset: str
+    shortAsset: str
+    usdValue: float
+    leverage: int
+    takeProfitPct: Optional[float] = None
+    stopLossPct: Optional[float] = None
+    orderId: Optional[str] = None
+    pearAccessToken: Optional[str] = None  # User's Pear token for position fetching
+
+
+@app.post("/api/trades/direct/notify")
+def notify_direct_trade(
+    payload: DirectTradeNotifyRequest,
+    session: Session = Depends(get_session),
+) -> Any:
+    """
+    Notify backend about a direct trade execution (for Telegram notifications).
+    Called by frontend after successfully executing a trade via Pear API directly.
+    """
+    logger.info(f"[DIRECT-TRADE] 🚀 Direct trade notification received")
+    logger.info(f"[DIRECT-TRADE]   Wallet (full): {payload.walletAddress}")
+    logger.info(f"[DIRECT-TRADE]   Pair: {payload.longAsset}/{payload.shortAsset}")
+    logger.info(f"[DIRECT-TRADE]   Size: ${payload.usdValue}, Leverage: {payload.leverage}x")
+    logger.info(f"[DIRECT-TRADE]   Pear token: {'SET' if payload.pearAccessToken else 'NOT SET'}")
+    
+    # Look up ALL Telegram users linked to this wallet (many-to-many)
+    wallet_address = payload.walletAddress.lower()
+    wallet_users = session.exec(
+        select(WalletUser).where(WalletUser.wallet_address == wallet_address)
+    ).all()
+    
+    # Update Pear access token for all linked users if provided
+    if payload.pearAccessToken and wallet_users:
+        for wu in wallet_users:
+            if not wu.pear_access_token:
+                wu.pear_access_token = payload.pearAccessToken
+                wu.updated_at = datetime.utcnow()
+                session.add(wu)
+        session.commit()
+        logger.info(f"[DIRECT-TRADE] ✅ Updated Pear access token for {len(wallet_users)} wallet-user link(s)")
+    
+    if wallet_users and telegram_app:
+        sent_to = []
+        errors = []
+        
+        # Format notification message
+        tp_str = f"+{payload.takeProfitPct:.1f}%" if payload.takeProfitPct else "N/A"
+        sl_str = f"-{payload.stopLossPct:.1f}%" if payload.stopLossPct else "N/A"
+        
+        message = (
+            f"🚀 *Trade Executed Successfully!*\n\n"
+            f"📊 *Pair:* {payload.longAsset} / {payload.shortAsset}\n"
+            f"💰 *Size:* ${payload.usdValue:,.2f}\n"
+            f"⚡ *Leverage:* {payload.leverage}x\n"
+            f"🎯 *Take Profit:* {tp_str}\n"
+            f"🛡️ *Stop Loss:* {sl_str}\n\n"
+            f"🔗 *Wallet:* `{wallet_address[:10]}...`"
+        )
+        
+        if payload.orderId:
+            message += f"\n📝 *Order ID:* `{payload.orderId[:12]}...`"
+        
+        # Send notification to ALL linked users
+        for wallet_user in wallet_users:
+            try:
+                import asyncio
+                async def send_notification(chat_id):
+                    await telegram_app.bot.send_message(
+                        chat_id=chat_id,
+                        text=message,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                
+                # Run in event loop
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.create_task(send_notification(wallet_user.telegram_chat_id))
+                    else:
+                        loop.run_until_complete(send_notification(wallet_user.telegram_chat_id))
+                except RuntimeError:
+                    asyncio.run(send_notification(wallet_user.telegram_chat_id))
+                    
+                sent_to.append(wallet_user.telegram_chat_id)
+                logger.info(f"[DIRECT-TRADE] 📱 Telegram notification sent to chat {wallet_user.telegram_chat_id}")
+            except Exception as e:
+                errors.append(str(e))
+                logger.error(f"[DIRECT-TRADE] ⚠️ Failed to send to {wallet_user.telegram_chat_id}: {e}")
+        
+        return {"success": True, "notificationSent": len(sent_to) > 0, "sentTo": sent_to, "errors": errors}
+    else:
+        logger.info(f"[DIRECT-TRADE] ℹ️ No Telegram user linked to wallet {wallet_address[:10]}...")
+        return {"success": True, "notificationSent": False, "reason": "Wallet not linked to Telegram"}
+
+
 @app.post("/api/trades/{trade_id}/execute", response_model=TradeSchema)
 def execute_trade(
     payload: ExecuteTradeRequest,
@@ -1468,6 +1589,7 @@ class LinkWalletRequest(BaseModel):
     telegramUserId: str
     telegramChatId: str
     telegramUsername: Optional[str] = None
+    pearAccessToken: Optional[str] = None  # User's Pear access token for fetching positions
 
 
 @app.post("/api/wallet/link")
@@ -1482,30 +1604,37 @@ def link_wallet_to_telegram(
     
     logger.info(f"[WALLET-LINK] 🔗 Linking wallet {wallet_address[:10]}... to Telegram user {payload.telegramUserId}")
     
-    # Check if wallet already linked
-    existing = session.get(WalletUser, wallet_address)
+    # Check if this exact wallet+user combination already exists
+    existing = session.exec(
+        select(WalletUser).where(
+            WalletUser.wallet_address == wallet_address,
+            WalletUser.telegram_user_id == payload.telegramUserId
+        )
+    ).first()
     now = datetime.utcnow()
     
     if existing:
         # Update existing link
-        existing.telegram_user_id = payload.telegramUserId
         existing.telegram_chat_id = payload.telegramChatId
         existing.telegram_username = payload.telegramUsername
+        if payload.pearAccessToken:
+            existing.pear_access_token = payload.pearAccessToken
         existing.updated_at = now
         session.add(existing)
-        logger.info(f"[WALLET-LINK] ✅ Updated existing wallet link")
+        logger.info(f"[WALLET-LINK] ✅ Updated existing wallet-user link")
     else:
-        # Create new link
+        # Create new link (allows same wallet for multiple users, same user for multiple wallets)
         wallet_user = WalletUser(
             wallet_address=wallet_address,
             telegram_user_id=payload.telegramUserId,
             telegram_chat_id=payload.telegramChatId,
             telegram_username=payload.telegramUsername,
+            pear_access_token=payload.pearAccessToken,
             created_at=now,
             updated_at=now,
         )
         session.add(wallet_user)
-        logger.info(f"[WALLET-LINK] ✅ Created new wallet link")
+        logger.info(f"[WALLET-LINK] ✅ Created new wallet-user link")
     
     session.commit()
     
@@ -1521,13 +1650,17 @@ def link_wallet_to_telegram(
 def get_wallet_link(
     wallet_address: str = Path(...), session: Session = Depends(get_session)
 ) -> Any:
-    """Get the Telegram user linked to a wallet address"""
+    """Get all Telegram users linked to a wallet address"""
     wallet_address = wallet_address.lower()
-    wallet_user = session.get(WalletUser, wallet_address)
+    wallet_users = session.exec(
+        select(WalletUser).where(WalletUser.wallet_address == wallet_address)
+    ).all()
     
-    if not wallet_user:
+    if not wallet_users:
         raise HTTPException(status_code=404, detail="Wallet not linked to any Telegram user")
     
+    # Return first user for backward compatibility, but include all
+    wallet_user = wallet_users[0]
     return {
         "walletAddress": wallet_user.wallet_address,
         "telegramUserId": wallet_user.telegram_user_id,
@@ -1797,7 +1930,7 @@ def build_notification_message(
     return {"text": message, "reply_markup": keyboard}
 
 
-async def send_notification(setting: NotificationSetting) -> None:
+async def send_notification(setting: NotificationSetting, session: Session) -> None:
     """Send PnL notification by fetching real positions from Pear Protocol API."""
     if not settings.bot_token or not telegram_app:
         logger.warning("[Notification] Bot not configured, skipping notification")
@@ -1805,11 +1938,23 @@ async def send_notification(setting: NotificationSetting) -> None:
 
     now_utc = datetime.utcnow()
     
+    # Find user's Pear access token from their linked wallets
+    user_wallet = session.exec(
+        select(WalletUser).where(
+            WalletUser.telegram_user_id == setting.user_id,
+            WalletUser.pear_access_token != None
+        )
+    ).first()
+    
+    # Use user's token if available, otherwise fall back to server token
+    access_token = user_wallet.pear_access_token if user_wallet and user_wallet.pear_access_token else settings.pear_access_token
+    token_source = "user" if user_wallet and user_wallet.pear_access_token else "server"
+    
     # Fetch real positions from Pear Protocol API
-    logger.info(f"[Notification] Fetching positions for user {setting.user_id}")
+    logger.info(f"[Notification] Fetching positions for user {setting.user_id} (token: {token_source})")
     raw_positions = await fetch_open_positions(
         api_url=settings.pear_api_url,
-        access_token=settings.pear_access_token
+        access_token=access_token
     )
     
     # Parse positions for notification format
@@ -1853,15 +1998,16 @@ async def notification_worker() -> None:
                     if not is_due(setting, now_utc):
                         continue
                     try:
-                        await send_notification(setting)
+                        await send_notification(setting, session)
                         setting.last_sent_at = now_utc
                         setting.updated_at = now_utc
                         session.add(setting)
                         session.commit()
-                    except Exception:
+                    except Exception as e:
+                        logger.error(f"[Notification] Error sending to {setting.user_id}: {e}")
                         session.rollback()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"[Notification] Worker error: {e}")
         await asyncio.sleep(60)
 
 

@@ -125,7 +125,11 @@ def parse_positions_for_notification(positions_data: Dict[str, Any]) -> Dict[str
         tp_value = take_profit.get("value", 0) if isinstance(take_profit, dict) else take_profit
         sl_value = stop_loss.get("value", 0) if isinstance(stop_loss, dict) else stop_loss
         
+        # Extract position ID from Pear API (try multiple possible field names)
+        position_id = pos.get("id") or pos.get("positionId") or pos.get("position_id") or pos.get("orderId")
+        
         parsed_pos = {
+            "position_id": position_id,
             "long_asset": long_asset,
             "short_asset": short_asset,
             "pnl": pnl,

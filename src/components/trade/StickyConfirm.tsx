@@ -147,6 +147,34 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData, walletAddr
           console.log('[StickyConfirm] ✅ Trade executed via Pear!')
           console.log('[StickyConfirm]   Order ID:', result.orderId || result.id)
           
+          // Notify backend for Telegram notification
+          if (walletAddress) {
+            try {
+              const notifyRes = await fetch(`${backendUrl}/api/trades/direct/notify`, {
+                method: 'POST',
+                headers: { 
+                  'Content-Type': 'application/json',
+                  'bypass-tunnel-reminder': 'true',
+                },
+                body: JSON.stringify({
+                  walletAddress: walletAddress,
+                  longAsset: longAsset,
+                  shortAsset: shortAsset,
+                  usdValue: positionData.usdValue,
+                  leverage: positionData.leverage,
+                  takeProfitPct: tradeData.takeProfitRatio ? Math.abs(tradeData.takeProfitRatio * 100) : null,
+                  stopLossPct: tradeData.stopLossRatio ? Math.abs(tradeData.stopLossRatio * 100) : null,
+                  orderId: result.orderId || result.id,
+                  pearAccessToken: pearAccessToken,
+                }),
+              })
+              const notifyResult = await notifyRes.json()
+              console.log('[StickyConfirm] 📱 Notification result:', notifyResult)
+            } catch (notifyErr) {
+              console.warn('[StickyConfirm] ⚠️ Failed to send notification:', notifyErr)
+            }
+          }
+          
           setState('confirmed')
           setShowConfetti(true)
           setTimeout(() => setShowConfetti(false), 3500)
