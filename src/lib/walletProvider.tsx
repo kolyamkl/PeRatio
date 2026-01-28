@@ -17,6 +17,7 @@ import {
   getPositions,
   executePearTrade,
   buildApprovalMessage,
+  getAvailableMargin,
   AgentWalletInfo,
 } from './pearAuth'
 
@@ -176,89 +177,140 @@ export function WalletProvider({ children }: WalletProviderProps) {
         balanceLoading: true,
       }))
       
-      // Fetch balance
-      fetchUSDCBalance(wagmiAddress).then(balance => {
-        setState(prev => ({ ...prev, balance, balanceLoading: false }))
-      })
-      
       // Auto-authenticate with Pear Protocol after wallet connection
-      const authenticateWithPearProtocol = async () => {
+      const authenticateWithPearProtocol = async (retryCount = 0) => {
+        const MAX_RETRIES = 3
+        const RETRY_DELAY = 3000
+        
         // Check if already authenticated
         const storedAuth = getStoredAuthState()
         if (storedAuth.isAuthenticated && storedAuth.accessToken) {
           console.log('[WalletProvider] Already authenticated with Pear, token:', storedAuth.accessToken?.substring(0, 30) + '...')
+          
+          // Fetch balance from Pear API
+          const pearBalance = await getAvailableMargin(storedAuth.accessToken)
+          
           setState(prev => ({
             ...prev,
             isPearAuthenticated: true,
+            isPearAuthenticating: false,
             pearAccessToken: storedAuth.accessToken,
             agentWallet: storedAuth.agentWallet,
+            balance: pearBalance,
+            balanceLoading: false,
           }))
           return
         }
         
-        console.log('[WalletProvider] 🔐 Starting Pear Protocol authentication...')
+        console.log('[WalletProvider] 🔐 Starting Pear Protocol authentication... (attempt ${retryCount + 1}/${MAX_RETRIES + 1})')
         console.log('[WalletProvider] Wallet address:', wagmiAddress)
         console.log('[WalletProvider] Connector:', connector?.name || 'unknown')
-        setState(prev => ({ ...prev, isPearAuthenticating: true }))
         
         try {
-          // Get provider from connector
-          let provider: any = null
-          if (connector) {
-            console.log('[WalletProvider] Getting provider from connector...')
-            provider = await connector.getProvider()
-            console.log('[WalletProvider] Provider from connector:', provider ? 'obtained' : 'null')
-          }
-          if (!provider) {
-            console.log('[WalletProvider] Falling back to window.ethereum')
-            provider = (window as any).ethereum
-          }
-          
-          if (!provider) {
-            console.error('[WalletProvider] No provider available for Pear auth')
-            setState(prev => ({ ...prev, isPearAuthenticating: false }))
-            return
+          // Switch to Arbitrum first if needed
+          if (wagmiChainId !== arbitrum.id) {
+            console.log('[WalletProvider] 🔄 Switching to Arbitrum (42161)...')
+            try {
+              await switchChainAsync({ chainId: arbitrum.id })
+              console.log('[WalletProvider] ✅ Switched to Arbitrum')
+              // Wait for the switch to propagate
+              await new Promise(resolve => setTimeout(resolve, 1500))
+            } catch (switchError: any) {
+              console.error('[WalletProvider] Chain switch error:', switchError)
+              // Continue anyway - user may have already switched manually
+            }
           }
           
-          console.log('[WalletProvider] Provider ready, calling authenticateWithPear...')
-          
-          // Authenticate with Pear Protocol (EIP-712 signing)
-          const authResult = await authenticateWithPear(wagmiAddress, provider)
+          // Use wagmi's signTypedDataAsync which handles chain correctly
+          console.log('[WalletProvider] Using wagmi signTypedDataAsync for signing...')
+          const authResult = await authenticateWithPear(wagmiAddress, signTypedDataAsync)
           
           console.log('[WalletProvider] ✅ Pear authentication successful!')
           console.log('[WalletProvider] Access token:', authResult.accessToken?.substring(0, 30) + '...')
+          
+          // Check/create agent wallet after authentication
+          console.log('[WalletProvider] 🔍 Checking agent wallet status...')
+          let agentWalletInfo = await checkAgentWallet(authResult.accessToken)
+          
+          if (!agentWalletInfo) {
+            console.log('[WalletProvider] 📝 Creating agent wallet...')
+            agentWalletInfo = await createAgentWallet(authResult.accessToken)
+            console.log('[WalletProvider] ✅ Agent wallet created:', agentWalletInfo.agentWalletAddress)
+          } else {
+            console.log('[WalletProvider] ✅ Agent wallet exists:', agentWalletInfo.agentWalletAddress)
+          }
+          
+          // Fetch balance from Pear API (available margin)
+          console.log('[WalletProvider] 💰 Fetching Pear balance...')
+          const pearBalance = await getAvailableMargin(authResult.accessToken)
+          
           setState(prev => ({
             ...prev,
             isPearAuthenticated: true,
             isPearAuthenticating: false,
             pearAccessToken: authResult.accessToken,
+            agentWallet: agentWalletInfo?.agentWalletAddress || null,
+            balance: pearBalance,
+            balanceLoading: false,
           }))
           
         } catch (error: any) {
           console.error('[WalletProvider] ❌ Pear authentication failed:', error)
           console.error('[WalletProvider] Error name:', error?.name)
           console.error('[WalletProvider] Error message:', error?.message)
-          console.error('[WalletProvider] Error stack:', error?.stack)
-          setState(prev => ({ 
-            ...prev, 
-            isPearAuthenticating: false,
-            error: `Pear auth failed: ${error.message}`
-          }))
+          
+          // Auto-retry if not max retries reached
+          if (retryCount < MAX_RETRIES) {
+            console.log(`[WalletProvider] 🔄 Retrying authentication in ${RETRY_DELAY/1000}s... (${retryCount + 1}/${MAX_RETRIES})`)
+            setTimeout(() => {
+              authenticateWithPearProtocol(retryCount + 1)
+            }, RETRY_DELAY)
+          } else {
+            console.error('[WalletProvider] ❌ Max retries reached, authentication failed')
+            setState(prev => ({ 
+              ...prev, 
+              isPearAuthenticating: false,
+              balanceLoading: false,
+              error: `Pear auth failed: ${error.message}`
+            }))
+          }
         }
       }
       
-      // Longer delay to ensure wallet connection and chain switch is fully established
-      // User may need to approve network switch in their wallet
+      // Show "preparing" state immediately, then authenticate after delay
+      // This gives user time to switch chain in their wallet if needed
+      setState(prev => ({ ...prev, isPearAuthenticating: true }))
+      
+      // 5 second delay to allow user to switch chain in wallet before signing
       setTimeout(() => {
         authenticateWithPearProtocol()
-      }, 3000)
+      }, 5000)
       
     } else if (!wagmiIsConnected && state.isConnected) {
       console.log('[WalletProvider] Web3Modal disconnected')
       setState(defaultState)
       clearAuthState()
     }
-  }, [wagmiIsConnected, wagmiAddress, connector])
+  }, [wagmiIsConnected, wagmiAddress, connector, wagmiChainId, switchChainAsync, signTypedDataAsync])
+
+  // Periodic balance refresh from Pear API (every 15 seconds)
+  useEffect(() => {
+    if (!state.isPearAuthenticated || !state.pearAccessToken) return
+    
+    const refreshPearBalance = async () => {
+      console.log('[WalletProvider] 🔄 Refreshing Pear balance...')
+      const pearBalance = await getAvailableMargin(state.pearAccessToken!)
+      setState(prev => ({ ...prev, balance: pearBalance }))
+    }
+    
+    // Refresh immediately on auth
+    refreshPearBalance()
+    
+    // Set up interval for periodic refresh
+    const intervalId = setInterval(refreshPearBalance, 15000) // Every 15 seconds
+    
+    return () => clearInterval(intervalId)
+  }, [state.isPearAuthenticated, state.pearAccessToken])
 
   // Check for existing auth on mount
   useEffect(() => {
@@ -289,11 +341,16 @@ export function WalletProvider({ children }: WalletProviderProps) {
               walletType: 'metamask',
               provider,
               chainId: parseInt(provider.chainId, 16),
+              balanceLoading: true,
             }))
             
-            // Fetch balance
-            const balance = await fetchUSDCBalance(address)
-            setState(prev => ({ ...prev, balance, balanceLoading: false }))
+            // If we have Pear auth, fetch balance from Pear API
+            if (storedAuth.isAuthenticated && storedAuth.accessToken) {
+              const pearBalance = await getAvailableMargin(storedAuth.accessToken)
+              setState(prev => ({ ...prev, balance: pearBalance, balanceLoading: false }))
+            } else {
+              setState(prev => ({ ...prev, balanceLoading: false }))
+            }
           }
         } catch (error) {
           console.error('[Wallet] Error checking existing connection:', error)

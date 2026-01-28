@@ -63,10 +63,47 @@ export function PairCard({
 
   const handleRemoveCoin = (type: 'long' | 'short', ticker: string) => {
     hapticFeedback('selection')
+    
     if (type === 'long') {
-      onLongCoinsChange(longCoins.filter(c => c.ticker !== ticker))
+      const remainingLong = longCoins.filter(c => c.ticker !== ticker)
+      
+      if (remainingLong.length === 0) {
+        // No long coins left - give all 100% to short side
+        onLongCoinsChange([])
+        if (shortCoins.length > 0) {
+          const evenWeight = 100 / shortCoins.length
+          onShortCoinsChange(shortCoins.map(c => ({ ...c, weight: evenWeight })))
+        }
+      } else {
+        // Redistribute: long side gets 50%, short side gets 50%
+        const longWeight = 50 / remainingLong.length
+        const shortWeight = shortCoins.length > 0 ? 50 / shortCoins.length : 0
+        
+        onLongCoinsChange(remainingLong.map(c => ({ ...c, weight: longWeight })))
+        if (shortCoins.length > 0) {
+          onShortCoinsChange(shortCoins.map(c => ({ ...c, weight: shortWeight })))
+        }
+      }
     } else {
-      onShortCoinsChange(shortCoins.filter(c => c.ticker !== ticker))
+      const remainingShort = shortCoins.filter(c => c.ticker !== ticker)
+      
+      if (remainingShort.length === 0) {
+        // No short coins left - give all 100% to long side
+        onShortCoinsChange([])
+        if (longCoins.length > 0) {
+          const evenWeight = 100 / longCoins.length
+          onLongCoinsChange(longCoins.map(c => ({ ...c, weight: evenWeight })))
+        }
+      } else {
+        // Redistribute: long side gets 50%, short side gets 50%
+        const shortWeight = 50 / remainingShort.length
+        const longWeight = longCoins.length > 0 ? 50 / longCoins.length : 0
+        
+        onShortCoinsChange(remainingShort.map(c => ({ ...c, weight: shortWeight })))
+        if (longCoins.length > 0) {
+          onLongCoinsChange(longCoins.map(c => ({ ...c, weight: longWeight })))
+        }
+      }
     }
   }
 

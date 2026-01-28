@@ -385,15 +385,15 @@ export function TradeConfirmPage() {
         <RiskRewardCard {...riskRewardData} stopLoss={stopLoss} takeProfit={takeProfit} />
         
         {/* Spacer for sticky button */}
-        <div className="h-20" />
+        <div className="h-10" />
       </div>
       
       {/* Sticky Confirm Button */}
       <StickyConfirm 
         disabled={false}
-        tradeId={currentTradeId || undefined}
+        tradeId={currentTradeId || 'direct-trade'}
         walletAddress={wallet.address || undefined}
-        tradeData={currentTradeId ? {
+        tradeData={{
           pair: {
             long: { 
               symbol: `${longCoins[0]?.ticker || 'BTC'}-PERP`, 
@@ -424,7 +424,7 @@ export function TradeConfirmPage() {
               weight: totalWeight > 0 ? c.weight / totalWeight : 1 / shortCoins.length 
             }))
           })(),
-        } : undefined}
+        }}
       />
 
       {/* Settings Modal */}

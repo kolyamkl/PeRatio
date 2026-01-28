@@ -70,9 +70,6 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData, walletAddr
     
     try {
       if (tradeId && tradeData) {
-        // Call real execute API
-        const apiUrl = `${backendUrl}/api/trades/${tradeId}/execute`
-        
         // Validate wallet address is provided - REQUIRED (no hardcoded fallback)
         if (!walletAddress) {
           throw new Error('Please connect your wallet to execute trades')
@@ -84,88 +81,148 @@ export function StickyConfirm({ disabled = false, tradeId, tradeData, walletAddr
           throw new Error('Please authenticate with Pear Protocol to execute trades')
         }
         
-        const requestBody = {
-          pair: tradeData.pair,
-          walletAddress: walletAddress,
-          pearAccessToken: pearAccessToken,
-          takeProfitRatio: tradeData.takeProfitRatio,
-          stopLossRatio: tradeData.stopLossRatio,
-          longBasket: tradeData.longBasket || [],
-          shortBasket: tradeData.shortBasket || [],
-        }
+        // For direct trades (no pre-generated tradeId), call Pear API directly
+        const isDirectTrade = tradeId === 'direct-trade'
         
-        console.log('[StickyConfirm] 📤 REQUEST DETAILS:')
-        console.log('[StickyConfirm]   URL:', apiUrl)
-        console.log('[StickyConfirm]   Method: POST')
-        console.log('[StickyConfirm]   Wallet:', walletAddress)
-        console.log('[StickyConfirm]   Body:', JSON.stringify(requestBody, null, 2))
-        
-        const res = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'bypass-tunnel-reminder': 'true',  // Required for localtunnel
-          },
-          body: JSON.stringify(requestBody),
-        })
-        
-        console.log('[StickyConfirm] 📥 RESPONSE:')
-        console.log('[StickyConfirm]   Status:', res.status, res.statusText)
-        console.log('[StickyConfirm]   OK:', res.ok)
-        console.log('[StickyConfirm]   Headers:', Object.fromEntries(res.headers.entries()))
-        
-        // Get response text first for debugging
-        const responseText = await res.text()
-        console.log('[StickyConfirm]   Body (raw):', responseText.substring(0, 500))
-        
-        if (!res.ok) {
-          let errorMessage = 'Trade execution failed'
-          try {
-            // Check if response looks like HTML/TypeScript (error page from tunnel/proxy)
-            const trimmedResponse = responseText.trim()
-            if (trimmedResponse.startsWith('<!DOCTYPE') || 
-                trimmedResponse.startsWith('<html') || 
-                trimmedResponse.startsWith('import ') ||
-                trimmedResponse.includes('</html>')) {
-              console.error('[StickyConfirm] ❌ Got HTML/code response instead of JSON - tunnel/proxy error')
-              errorMessage = `Server unavailable (status ${res.status}). Please try again.`
-            } else {
-              const error = JSON.parse(responseText)
-              console.error('[StickyConfirm] ❌ Error response parsed:', error)
-              errorMessage = error.detail || error.message || error.error || errorMessage
-            }
-          } catch (parseErr) {
-            console.error('[StickyConfirm] ❌ Could not parse error response:', parseErr)
-            // Don't show raw HTML/code to user
-            if (responseText.length > 200 || responseText.includes('<') || responseText.includes('import ')) {
-              errorMessage = `Server error (status ${res.status}). Please try again.`
-            } else {
-              errorMessage = responseText || errorMessage
-            }
+        if (isDirectTrade) {
+          // Execute directly via Pear Protocol API
+          const PEAR_API_URL = 'https://hl-v2.pearprotocol.io'
+          
+          // Get primary assets from baskets
+          const longAsset = tradeData.longBasket?.[0]?.coin || tradeData.pair.long.symbol.replace('-PERP', '')
+          const shortAsset = tradeData.shortBasket?.[0]?.coin || tradeData.pair.short.symbol.replace('-PERP', '')
+          
+          const totalNotional = tradeData.pair.long.notional + tradeData.pair.short.notional
+          
+          // Build position request for Pear API
+          const positionData = {
+            executionType: 'MARKET',
+            slippage: 0.08,
+            leverage: tradeData.pair.long.leverage,
+            usdValue: Math.min(totalNotional, 20), // Cap at $20
+            longAssets: [{ asset: longAsset, weight: 1.0 }],
+            shortAssets: [{ asset: shortAsset, weight: 1.0 }],
+            takeProfit: tradeData.takeProfitRatio ? {
+              type: 'PERCENTAGE',
+              value: Math.abs(tradeData.takeProfitRatio * 100)
+            } : undefined,
+            stopLoss: tradeData.stopLossRatio ? {
+              type: 'PERCENTAGE', 
+              value: Math.abs(tradeData.stopLossRatio * 100)
+            } : undefined,
           }
-          throw new Error(errorMessage)
+          
+          console.log('[StickyConfirm] 🍐 DIRECT PEAR API EXECUTION')
+          console.log('[StickyConfirm]   URL:', `${PEAR_API_URL}/positions`)
+          console.log('[StickyConfirm]   Long:', longAsset)
+          console.log('[StickyConfirm]   Short:', shortAsset)
+          console.log('[StickyConfirm]   USD Value:', positionData.usdValue)
+          console.log('[StickyConfirm]   Leverage:', positionData.leverage)
+          console.log('[StickyConfirm]   Body:', JSON.stringify(positionData, null, 2))
+          
+          const res = await fetch(`${PEAR_API_URL}/positions`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${pearAccessToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(positionData),
+          })
+          
+          const responseText = await res.text()
+          console.log('[StickyConfirm] 📥 Pear Response:', res.status, responseText.substring(0, 500))
+          
+          if (!res.ok) {
+            let errorMessage = 'Trade execution failed'
+            try {
+              const error = JSON.parse(responseText)
+              errorMessage = error.message || error.error || error.detail || errorMessage
+            } catch {
+              errorMessage = responseText.length < 200 ? responseText : errorMessage
+            }
+            throw new Error(errorMessage)
+          }
+          
+          const result = JSON.parse(responseText)
+          console.log('[StickyConfirm] ✅ Trade executed via Pear!')
+          console.log('[StickyConfirm]   Order ID:', result.orderId || result.id)
+          
+          setState('confirmed')
+          setShowConfetti(true)
+          setTimeout(() => setShowConfetti(false), 3500)
+          try { hapticFeedback('notification', 'success') } catch {}
+          showToast('Trade executed via Pear Protocol!', 'success')
+        } else {
+          // Use backend API for pre-generated trades
+          const apiUrl = `${backendUrl}/api/trades/${tradeId}/execute`
+          
+          const requestBody = {
+            pair: tradeData.pair,
+            walletAddress: walletAddress,
+            pearAccessToken: pearAccessToken,
+            takeProfitRatio: tradeData.takeProfitRatio,
+            stopLossRatio: tradeData.stopLossRatio,
+            longBasket: tradeData.longBasket || [],
+            shortBasket: tradeData.shortBasket || [],
+          }
+          
+          console.log('[StickyConfirm] 📤 REQUEST DETAILS:')
+          console.log('[StickyConfirm]   URL:', apiUrl)
+          console.log('[StickyConfirm]   Method: POST')
+          console.log('[StickyConfirm]   Wallet:', walletAddress)
+          console.log('[StickyConfirm]   Body:', JSON.stringify(requestBody, null, 2))
+          
+          const res = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'bypass-tunnel-reminder': 'true',
+            },
+            body: JSON.stringify(requestBody),
+          })
+          
+          console.log('[StickyConfirm] 📥 RESPONSE:')
+          console.log('[StickyConfirm]   Status:', res.status, res.statusText)
+          
+          const responseText = await res.text()
+          console.log('[StickyConfirm]   Body (raw):', responseText.substring(0, 500))
+          
+          if (!res.ok) {
+            let errorMessage = 'Trade execution failed'
+            try {
+              const trimmedResponse = responseText.trim()
+              if (trimmedResponse.startsWith('<!DOCTYPE') || 
+                  trimmedResponse.startsWith('<html') || 
+                  trimmedResponse.startsWith('import ') ||
+                  trimmedResponse.includes('</html>')) {
+                errorMessage = `Server unavailable (status ${res.status}). Please try again.`
+              } else {
+                const error = JSON.parse(responseText)
+                errorMessage = error.detail || error.message || error.error || errorMessage
+              }
+            } catch {
+              if (responseText.length > 200 || responseText.includes('<') || responseText.includes('import ')) {
+                errorMessage = `Server error (status ${res.status}). Please try again.`
+              } else {
+                errorMessage = responseText || errorMessage
+              }
+            }
+            throw new Error(errorMessage)
+          }
+          
+          const result = JSON.parse(responseText)
+          console.log('[StickyConfirm] ✅ Trade executed successfully!')
+          console.log('[StickyConfirm]   Result:', result)
+          
+          setState('confirmed')
+          setShowConfetti(true)
+          setTimeout(() => setShowConfetti(false), 3500)
+          try { hapticFeedback('notification', 'success') } catch {}
+          showToast('Trade executed via Pear Protocol!', 'success')
         }
-        
-        const result = JSON.parse(responseText)
-        console.log('[StickyConfirm] ✅ Trade executed successfully!')
-        console.log('[StickyConfirm]   Result:', result)
-        
-        setState('confirmed')
-        setShowConfetti(true)
-        setTimeout(() => setShowConfetti(false), 3500)
-        try { hapticFeedback('notification', 'success') } catch {}
-        showToast('Trade executed via Pear Protocol!', 'success')
       } else {
-        // Demo mode - no tradeId
-        console.log('[StickyConfirm] ⚠️ Demo mode - simulating trade')
-        console.log('[StickyConfirm]   tradeId:', tradeId)
-        console.log('[StickyConfirm]   tradeData:', tradeData)
-        await new Promise(resolve => setTimeout(resolve, 1500))
-        setState('confirmed')
-        setShowConfetti(true)
-        setTimeout(() => setShowConfetti(false), 3500)
-        try { hapticFeedback('notification', 'success') } catch {}
-        showToast('Trade submitted (demo)', 'success')
+        // No tradeData - this shouldn't happen now
+        throw new Error('Trade data is missing. Please refresh and try again.')
       }
     } catch (err: unknown) {
       console.error('[StickyConfirm] ❌ EXECUTION FAILED')

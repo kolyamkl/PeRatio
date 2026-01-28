@@ -52,14 +52,14 @@ export function ParamsCard({
 
   const handleStopLossChange = (delta: number) => {
     hapticFeedback('selection')
-    const newValue = Math.max(0.5, Math.min(10, localStopLoss + delta))
+    const newValue = Math.max(0.5, Math.min(50, localStopLoss + delta))
     setLocalStopLoss(newValue)
     onRiskChange?.(newValue, localTakeProfit)
   }
 
   const handleTakeProfitChange = (delta: number) => {
     hapticFeedback('selection')
-    const newValue = Math.max(0.5, Math.min(20, localTakeProfit + delta))
+    const newValue = Math.max(0.5, Math.min(100, localTakeProfit + delta))
     setLocalTakeProfit(newValue)
     onRiskChange?.(localStopLoss, newValue)
   }

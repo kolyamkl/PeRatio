@@ -276,6 +276,100 @@ export async function getUserState(accessToken: string): Promise<any> {
 }
 
 /**
+ * Get available margin from Pear Protocol (withdrawable balance)
+ * This is the actual trading balance available on Pear Garden
+ * 
+ * Strategy:
+ * 1. Get the user's wallet address from the JWT token
+ * 2. Query Hyperliquid's public API directly for the user's balance
+ */
+export async function getAvailableMargin(accessToken: string): Promise<number> {
+  console.log('[PearAuth] 💰 Fetching available margin...')
+  
+  // Extract user address from JWT token
+  let userAddress: string | null = null
+  try {
+    const tokenPayload = JSON.parse(atob(accessToken.split('.')[1]))
+    userAddress = tokenPayload.address || tokenPayload.userId
+    console.log('[PearAuth] User address from token:', userAddress)
+  } catch (e) {
+    console.log('[PearAuth] Could not parse JWT token')
+  }
+  
+  // If we have the user address, query Hyperliquid directly
+  if (userAddress) {
+    try {
+      console.log('[PearAuth] Querying Hyperliquid API for balance...')
+      const hlResponse = await fetch('https://api.hyperliquid.xyz/info', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'clearinghouseState',
+          user: userAddress,
+        }),
+      })
+      
+      if (hlResponse.ok) {
+        const hlData = await hlResponse.json()
+        console.log('[PearAuth] Hyperliquid response:', JSON.stringify(hlData).substring(0, 500))
+        
+        // Hyperliquid clearinghouseState response structure:
+        // { marginSummary: { accountValue, totalMarginUsed, ... }, withdrawable, ... }
+        if (hlData.withdrawable !== undefined) {
+          const margin = parseFloat(hlData.withdrawable) || 0
+          console.log('[PearAuth] ✅ Found withdrawable from Hyperliquid:', margin)
+          return margin
+        }
+        if (hlData.marginSummary?.accountValue !== undefined) {
+          const margin = parseFloat(hlData.marginSummary.accountValue) || 0
+          console.log('[PearAuth] ✅ Found accountValue from Hyperliquid:', margin)
+          return margin
+        }
+      }
+    } catch (error) {
+      console.log('[PearAuth] Hyperliquid API error:', error)
+    }
+  }
+  
+  // Fallback: Try Pear API endpoints
+  // Try /hl/user-state 
+  try {
+    console.log('[PearAuth] Trying Pear /hl/user-state endpoint...')
+    const response = await fetch(`${PEAR_API_URL}/hl/user-state`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json',
+      },
+    })
+    
+    if (response.ok) {
+      const data = await response.json()
+      console.log('[PearAuth] /hl/user-state response:', JSON.stringify(data).substring(0, 500))
+      
+      if (data.withdrawable !== undefined) {
+        const margin = parseFloat(data.withdrawable) || 0
+        console.log('[PearAuth] ✅ Found withdrawable:', margin)
+        return margin
+      }
+      if (data.marginSummary?.accountValue !== undefined) {
+        const margin = parseFloat(data.marginSummary.accountValue) || 0
+        console.log('[PearAuth] ✅ Found marginSummary.accountValue:', margin)
+        return margin
+      }
+    } else {
+      console.log('[PearAuth] /hl/user-state returned', response.status)
+    }
+  } catch (error) {
+    console.log('[PearAuth] /hl/user-state error:', error)
+  }
+  
+  console.log('[PearAuth] ⚠️ Could not fetch balance')
+  return 0
+}
+
+/**
  * Get open positions from Pear Protocol
  */
 export async function getPositions(accessToken: string): Promise<any[]> {

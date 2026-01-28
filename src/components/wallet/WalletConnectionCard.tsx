@@ -106,65 +106,34 @@ export function WalletConnectionCard() {
           <div className="flex items-center gap-2">
             {isPearAuthenticated ? (
               <CheckCircle className="w-4 h-4 text-green-500" />
+            ) : isPearAuthenticating ? (
+              <RefreshCw className="w-4 h-4 text-accent-primary animate-spin" />
             ) : (
               <AlertCircle className="w-4 h-4 text-orange-500" />
             )}
             <span className="text-xs text-text-muted">
-              Pear Protocol: {isPearAuthenticated ? 'Authenticated' : 'Not Authenticated'}
+              {isPearAuthenticated 
+                ? 'Pear Protocol: Ready to Trade' 
+                : isPearAuthenticating 
+                  ? 'Preparing Pear Protocol...' 
+                  : 'Pear Protocol: Setup Required'}
             </span>
           </div>
-          {!isPearAuthenticated && (
-            <button
-              onClick={() => {
-                hapticFeedback('impact', 'light')
-                authenticateWithPearManual?.()
-              }}
-              disabled={isPearAuthenticating}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-accent-primary/10 text-accent-primary hover:bg-accent-primary/20 rounded-lg transition-colors disabled:opacity-50"
-            >
-              {isPearAuthenticating ? (
-                <>
-                  <RefreshCw className="w-3 h-3 animate-spin" />
-                  Authenticating...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-3 h-3" />
-                  Authenticate
-                </>
-              )}
-            </button>
+          {isPearAuthenticated && (
+            <span className="text-xs font-medium text-green-500">Active</span>
           )}
         </div>
+        {isPearAuthenticating && (
+          <p className="text-xs text-text-muted mt-2">
+            Switch to Arbitrum One in your wallet now. A signature request will appear shortly...
+          </p>
+        )}
         {!isPearAuthenticated && !isPearAuthenticating && (
           <p className="text-xs text-text-muted mt-2">
-            Switch to Arbitrum One in your wallet, then click Authenticate
+            Authentication failed. Reconnect wallet to retry.
           </p>
         )}
       </div>
-      
-      {/* Agent Wallet Approval Notice */}
-      {isPearAuthenticated && (
-        <div className="mt-3 p-3 bg-orange-500/10 rounded-xl border border-orange-500/20">
-          <div className="flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
-            <div>
-              <p className="text-xs font-medium text-orange-500">Agent Wallet Setup Required</p>
-              <p className="text-xs text-text-muted mt-1">
-                To execute trades, you must approve Pear Protocol's agent wallet on Hyperliquid.
-              </p>
-              <a
-                href="https://app.hyperliquid.xyz/api-wallet"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 mt-2 text-xs font-medium text-accent-primary hover:underline"
-              >
-                Open Hyperliquid API Wallet Page →
-              </a>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Disconnect button */}
       <button
