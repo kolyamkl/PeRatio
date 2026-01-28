@@ -7,19 +7,71 @@ import {
   CheckCircle2,
   XCircle
 } from 'lucide-react'
-import { 
-  type Trade, 
-  formatCurrency, 
-  formatPercent, 
-  formatLeverage, 
-  formatDate 
-} from '../../lib/mockData'
 import { hapticFeedback } from '../../lib/telegram'
+
+// Local formatting functions
+function formatCurrency(value: number, decimals = 2): string {
+  if (Math.abs(value) >= 1000) {
+    return `$${value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
+  }
+  return `$${value.toFixed(decimals)}`
+}
+
+function formatPercent(value: number, showSign = false): string {
+  const sign = showSign && value > 0 ? '+' : ''
+  return `${sign}${value.toFixed(2)}%`
+}
+
+function formatLeverage(leverage: number): string {
+  return `${leverage}x`
+}
+
+function formatDate(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
 
 interface Ripple {
   id: number
   x: number
   y: number
+}
+
+// Trade interface matching what TradesPage passes
+interface Trade {
+  id: string
+  longCoin: { name: string; ticker: string; price: number }
+  shortCoin: { name: string; ticker: string; price: number }
+  notionalUsd: number
+  leverage: number
+  pnlUsd: number
+  pnlPct: number
+  status: 'open' | 'closed'
+  details: {
+    takeProfitPct: number
+    stopLossPct: number
+    currentPriceLong: number
+    currentPriceShort: number
+    entryPriceLong: number
+    entryPriceShort: number
+    orderId: string
+    strategyTag: string
+    correlation: number
+    cointegration: boolean
+    halfLife: number
+    zScore?: number
+    hedgeRatio?: number
+    winRate?: number
+    sharpeRatio?: number
+    volatility?: number
+    timeframe?: string
+    tradingEngine?: string
+    remarks?: string
+  }
+  openedAt: Date
+  createdAt: Date
+  closedAt?: Date
+  expiresAt?: Date
 }
 
 interface TradeCardProps {

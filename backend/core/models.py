@@ -95,3 +95,50 @@ class NotificationSetting(SQLModel, table=True):
     last_sent_at: Optional[datetime] = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
+class AgentPearSignal(SQLModel, table=True):
+    """
+    Stores all Agent Pear signals from Telegram for metrics calculation.
+    Both OPEN signals and CLOSE signals are stored to track performance.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    message_id: int = Field(index=True, unique=True)  # Telegram message ID
+    signal_type: str = Field(index=True)  # "OPEN" or "CLOSE"
+    
+    # Pair info
+    long_asset: str = Field(index=True)
+    short_asset: str = Field(index=True)
+    
+    # Entry data (for OPEN signals)
+    entry_price: Optional[float] = Field(default=None)
+    z_score: Optional[float] = Field(default=None)
+    rolling_z_score: Optional[float] = Field(default=None)
+    correlation: Optional[float] = Field(default=None)
+    cointegration: Optional[bool] = Field(default=None)
+    hedge_ratio: Optional[float] = Field(default=None)
+    long_weight: Optional[float] = Field(default=None)  # e.g., 55.7%
+    short_weight: Optional[float] = Field(default=None)  # e.g., 44.3%
+    expected_reversion_days: Optional[float] = Field(default=None)
+    backtest_win_rate: Optional[float] = Field(default=None)
+    platforms: Optional[str] = Field(default=None)  # "SYMMIO, HYPERLIQUID"
+    timeframe: Optional[str] = Field(default=None)  # "1h", "4h", etc.
+    
+    # Exit data (for CLOSE signals)
+    exit_price: Optional[float] = Field(default=None)
+    entry_z_score: Optional[float] = Field(default=None)  # z-score at entry
+    exit_z_score: Optional[float] = Field(default=None)  # z-score at exit
+    result: Optional[str] = Field(default=None, index=True)  # "profit" or "loss"
+    max_returns_pct: Optional[float] = Field(default=None)  # Max attainable returns %
+    leverage_used: Optional[int] = Field(default=None)  # e.g., 54x
+    close_reason: Optional[str] = Field(default=None)  # "mean reversion", "stop loss", etc.
+    
+    # Linked open signal (for CLOSE signals)
+    linked_open_message_id: Optional[int] = Field(default=None, index=True)
+    
+    # Timestamps
+    signal_date: datetime = Field(index=True)  # Date from Telegram message
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    
+    # Raw message for reference
+    raw_message: Optional[str] = Field(default=None)

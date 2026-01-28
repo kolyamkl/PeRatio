@@ -22,7 +22,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 
 from core.config import get_settings
 from core.database import engine, get_session, init_db
-from core.models import NotificationSetting, Trade
+from core.models import NotificationSetting, Trade, AgentPearSignal
 
 # Security: Import security middleware and utilities
 from security import (
@@ -934,10 +934,21 @@ async def broadcast_pear_signal(signal_data: Dict[str, Any]) -> Any:
                     # Format message using existing function
                     message, keyboard = format_trade_message(trade_data)
                     
+                    # Add "Close Trade" button if user has notifications enabled
+                    # The keyboard already has "Review & Confirm" button, add close button below
+                    keyboard_buttons = list(keyboard.inline_keyboard)
+                    keyboard_buttons.append([
+                        InlineKeyboardButton(
+                            text="🛑 Close Trade Immediately",
+                            callback_data=f"stop_trade:{trade_id}"
+                        )
+                    ])
+                    enhanced_keyboard = InlineKeyboardMarkup(keyboard_buttons)
+                    
                     await telegram_app.bot.send_message(
                         chat_id=setting.chat_id,
                         text=message,
-                        reply_markup=keyboard,
+                        reply_markup=enhanced_keyboard,
                         parse_mode=ParseMode.MARKDOWN
                     )
                     sent_count += 1
@@ -1726,3 +1737,204 @@ async def notification_worker() -> None:
         except Exception:
             pass
         await asyncio.sleep(60)
+
+
+@app.get("/api/pear-signals/history")
+async def get_pear_signal_history(
+    limit: int = 30,
+    signal_type: Optional[str] = None,
+    session: Session = Depends(get_session)
+) -> List[Dict[str, Any]]:
+    """
+    Get recent Agent Pear signals for display in the trades page.
+    Returns both OPEN and CLOSE signals with all relevant data.
+    """
+    query = select(AgentPearSignal).order_by(AgentPearSignal.signal_date.desc())
+    
+    if signal_type:
+        query = query.where(AgentPearSignal.signal_type == signal_type.upper())
+    
+    query = query.limit(limit)
+    signals = session.exec(query).all()
+    
+    result = []
+    for s in signals:
+        signal_data = {
+            "id": s.id,
+            "message_id": s.message_id,
+            "signal_type": s.signal_type,
+            "long_asset": s.long_asset,
+            "short_asset": s.short_asset,
+            "entry_price": s.entry_price,
+            "exit_price": s.exit_price,
+            "z_score": s.z_score,
+            "rolling_z_score": s.rolling_z_score,
+            "correlation": s.correlation,
+            "cointegration": s.cointegration,
+            "hedge_ratio": s.hedge_ratio,
+            "long_weight": s.long_weight,
+            "short_weight": s.short_weight,
+            "expected_reversion_days": s.expected_reversion_days,
+            "backtest_win_rate": s.backtest_win_rate,
+            "platforms": s.platforms,
+            "timeframe": s.timeframe,
+            "result": s.result,
+            "max_returns_pct": s.max_returns_pct,
+            "leverage_used": s.leverage_used,
+            "close_reason": s.close_reason,
+            "signal_date": s.signal_date.isoformat() if s.signal_date else None,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        result.append(signal_data)
+    
+    return result
+
+
+@app.get("/api/pear-signals/chart-data")
+async def get_pear_signal_chart_data(
+    days: int = 30,
+    session: Session = Depends(get_session)
+) -> Dict[str, Any]:
+    """
+    Get chart data for performance visualization.
+    Returns cumulative P&L data points for the chart.
+    """
+    from datetime import timedelta
+    
+    cutoff_date = datetime.utcnow() - timedelta(days=days)
+    
+    # Get all CLOSE signals within the time range (these have P&L data)
+    close_signals = session.exec(
+        select(AgentPearSignal)
+        .where(AgentPearSignal.signal_type == "CLOSE")
+        .where(AgentPearSignal.signal_date >= cutoff_date)
+        .order_by(AgentPearSignal.signal_date.asc())
+    ).all()
+    
+    # Build chart data points
+    data_points = []
+    cumulative_pnl = 0
+    
+    for s in close_signals:
+        if s.max_returns_pct is not None:
+            cumulative_pnl += s.max_returns_pct
+            data_points.append({
+                "date": s.signal_date.isoformat() if s.signal_date else None,
+                "pnl": s.max_returns_pct,
+                "cumulative": round(cumulative_pnl, 2),
+                "pair": f"{s.long_asset}/{s.short_asset}",
+                "result": s.result,
+            })
+    
+    # Calculate stats for the period
+    total_trades = len(close_signals)
+    wins = sum(1 for s in close_signals if s.result == 'profit')
+    losses = sum(1 for s in close_signals if s.result == 'loss')
+    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+    
+    return {
+        "data_points": data_points,
+        "stats": {
+            "total_trades": total_trades,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(win_rate, 1),
+            "total_pnl": round(cumulative_pnl, 2),
+        }
+    }
+
+
+@app.get("/api/pear-signals/metrics")
+async def get_pear_signal_metrics(session: Session = Depends(get_session)) -> Dict[str, Any]:
+    """
+    Get performance metrics for all Agent Pear signals.
+    Returns metrics like total trades, win rate, APY, profit factor, etc.
+    """
+    # Get all CLOSE signals (these have results)
+    close_signals = session.exec(
+        select(AgentPearSignal).where(AgentPearSignal.signal_type == "CLOSE")
+    ).all()
+    
+    if not close_signals:
+        return {
+            "total_trades": 0,
+            "win_rate": 0,
+            "apy": 0,
+            "total_return_with_leverage": 0,
+            "total_return_without_leverage": 0,
+            "avg_trades_per_day": 0,
+            "avg_returns_per_day": 0,
+            "profit_factor": 0,
+            "avg_duration_hours": 0,
+        }
+    
+    total_trades = len(close_signals)
+    wins = sum(1 for s in close_signals if s.result == 'profit')
+    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+    
+    # Calculate returns
+    returns_with_leverage = []
+    returns_without_leverage = []
+    
+    for s in close_signals:
+        if s.max_returns_pct is not None and s.leverage_used:
+            returns_with_leverage.append(s.max_returns_pct)
+            returns_without_leverage.append(s.max_returns_pct / s.leverage_used if s.leverage_used > 0 else 0)
+    
+    total_return_with_leverage = sum(returns_with_leverage)
+    total_return_without_leverage = sum(returns_without_leverage)
+    
+    # Calculate profit factor
+    gross_profit = sum(r for r in returns_with_leverage if r > 0)
+    gross_loss = abs(sum(r for r in returns_with_leverage if r < 0))
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else 99.99
+    
+    # Calculate average duration
+    durations = []
+    open_signals = session.exec(
+        select(AgentPearSignal).where(AgentPearSignal.signal_type == "OPEN")
+    ).all()
+    
+    open_map = {}
+    for s in open_signals:
+        key = f"{s.long_asset}/{s.short_asset}"
+        if key not in open_map:
+            open_map[key] = []
+        open_map[key].append(s)
+    
+    for close_signal in close_signals:
+        key = f"{close_signal.long_asset}/{close_signal.short_asset}"
+        if key in open_map:
+            for open_signal in reversed(open_map[key]):
+                if open_signal.signal_date < close_signal.signal_date:
+                    duration = (close_signal.signal_date - open_signal.signal_date).total_seconds() / 3600
+                    durations.append(duration)
+                    break
+    
+    avg_duration_hours = sum(durations) / len(durations) if durations else 0
+    
+    # Get date range for trades per day calculation
+    dates = [s.signal_date for s in close_signals]
+    min_date = min(dates)
+    max_date = max(dates)
+    days = max(1, (max_date - min_date).days)
+    trades_per_day = total_trades / days
+    
+    # Average returns per day
+    avg_returns_per_day = total_return_with_leverage / days if days > 0 else 0
+    
+    # APY calculation
+    daily_return = avg_returns_per_day / 100
+    apy = ((1 + daily_return) ** 365 - 1) * 100 if daily_return > -1 else 0
+    
+    return {
+        "total_trades": total_trades,
+        "win_rate": round(win_rate, 1),
+        "apy": round(min(apy, 999), 1),
+        "total_return_with_leverage": round(total_return_with_leverage, 1),
+        "total_return_without_leverage": round(total_return_without_leverage, 1),
+        "avg_trades_per_day": round(trades_per_day, 1),
+        "avg_returns_per_day": round(avg_returns_per_day, 1),
+        "profit_factor": round(min(profit_factor, 99.99), 2),
+        "avg_duration_hours": round(avg_duration_hours, 1),
+    }

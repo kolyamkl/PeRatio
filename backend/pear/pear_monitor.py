@@ -14,6 +14,10 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 
+from sqlmodel import Session, select
+from core.database import engine
+from core.models import AgentPearSignal
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -138,24 +142,238 @@ def save_signal(signal_data: Dict[str, Any]):
     with open(SIGNALS_HISTORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(history, f, indent=2, ensure_ascii=False)
 
+def is_close_message(text: str) -> bool:
+    """
+    Check if the message is about closing a position (not opening).
+    We only want to notify users about NEW trade opportunities, not closures.
+    """
+    text_lower = text.lower()
+    
+    # Keywords that indicate a close/exit message
+    close_keywords = [
+        'closed', 'closing', 'close position', 'exit', 'exited', 'exiting',
+        'took profit', 'take profit hit', 'tp hit', 'stopped out', 'stop loss hit',
+        'sl hit', 'position closed', 'trade closed', 'liquidated', 'liquidation',
+        'sold', 'covered', 'unwound', 'unwind', 'flatten', 'flattened',
+        'realized pnl', 'realized profit', 'realized loss', 'closed at',
+        'exit at', 'closed for', 'profit taken', 'loss taken'
+    ]
+    
+    for keyword in close_keywords:
+        if keyword in text_lower:
+            return True
+    
+    return False
+
+
+def save_signal_to_db(text: str, message_id: int, signal_date: datetime) -> Optional[AgentPearSignal]:
+    """
+    Parse and save a signal (OPEN or CLOSE) to the database.
+    Returns the saved signal or None if parsing failed.
+    """
+    try:
+        is_close = is_close_message(text)
+        
+        if is_close:
+            # Parse CLOSE signal
+            signal = parse_close_signal_to_db(text, message_id, signal_date)
+        else:
+            # Parse OPEN signal
+            signal = parse_open_signal_to_db(text, message_id, signal_date)
+        
+        if not signal:
+            return None
+        
+        with Session(engine) as session:
+            # Check if already exists
+            existing = session.exec(
+                select(AgentPearSignal).where(AgentPearSignal.message_id == message_id)
+            ).first()
+            
+            if existing:
+                logger.info(f"[PEAR_MONITOR] Signal {message_id} already exists in DB")
+                return existing
+            
+            session.add(signal)
+            session.commit()
+            session.refresh(signal)
+            logger.info(f"[PEAR_MONITOR] 💾 Saved {signal.signal_type} signal to DB: {signal.long_asset}/{signal.short_asset}")
+            return signal
+            
+    except Exception as e:
+        logger.error(f"[PEAR_MONITOR] ❌ Error saving signal to DB: {e}")
+        return None
+
+
+def parse_open_signal_to_db(text: str, message_id: int, signal_date: datetime) -> Optional[AgentPearSignal]:
+    """Parse an OPEN signal message for database storage"""
+    if "Pair Trade Signal" not in text:
+        return None
+    
+    signal = AgentPearSignal(
+        message_id=message_id,
+        signal_type="OPEN",
+        signal_date=signal_date,
+        raw_message=text[:2000]
+    )
+    
+    # Parse pair: **🔄 Pair:** `BTC` / `BNB`
+    pair_match = re.search(r'\*\*🔄 Pair:\*\*\s*`?([A-Z0-9]+)`?\s*/\s*`?([A-Z0-9]+)`?', text)
+    if pair_match:
+        signal.long_asset = pair_match.group(1)
+        signal.short_asset = pair_match.group(2)
+    else:
+        pair_match = re.search(r'Pair:\s*([A-Z0-9]+)\s*/\s*([A-Z0-9]+)', text, re.IGNORECASE)
+        if pair_match:
+            signal.long_asset = pair_match.group(1)
+            signal.short_asset = pair_match.group(2)
+        else:
+            return None
+    
+    # Parse entry price
+    price_match = re.search(r'Entry Price:\*?\*?\s*([0-9.]+)', text)
+    if price_match:
+        signal.entry_price = float(price_match.group(1))
+    
+    # Parse Z-Score
+    zscore_match = re.search(r'Z-Score:\*?\*?\s*([+-]?[0-9.]+)\s*\|\s*Rolling:\s*([+-]?[0-9.]+)', text)
+    if zscore_match:
+        signal.z_score = float(zscore_match.group(1))
+        signal.rolling_z_score = float(zscore_match.group(2))
+    else:
+        zscore_match = re.search(r'Z-Score:\*?\*?\s*([+-]?[0-9.]+)', text)
+        if zscore_match:
+            signal.z_score = float(zscore_match.group(1))
+    
+    # Parse correlation
+    correl_match = re.search(r'Correl:\*?\*?\s*([0-9.]+)', text)
+    if correl_match:
+        signal.correlation = float(correl_match.group(1))
+    
+    # Parse cointegration
+    coint_match = re.search(r'Cointegration:\*?\*?\s*(Yes|No)', text, re.IGNORECASE)
+    if coint_match:
+        signal.cointegration = coint_match.group(1).lower() == 'yes'
+    
+    # Parse hedge ratio
+    hedge_match = re.search(r'Hedge Ratio:\*?\*?\s*([0-9.]+)\s*\(([0-9.]+)%\s*[A-Z0-9]+,\s*([0-9.]+)%', text)
+    if hedge_match:
+        signal.hedge_ratio = float(hedge_match.group(1))
+        signal.long_weight = float(hedge_match.group(2))
+        signal.short_weight = float(hedge_match.group(3))
+    
+    # Parse expected reversion
+    reversion_match = re.search(r'Expected Reversion:\*?\*?\s*~?([0-9.]+)\s*days?', text)
+    if reversion_match:
+        signal.expected_reversion_days = float(reversion_match.group(1))
+    
+    # Parse backtest win rate
+    winrate_match = re.search(r'Backtest Win Rate:\*?\*?\s*([0-9.]+)%', text)
+    if winrate_match:
+        signal.backtest_win_rate = float(winrate_match.group(1))
+    
+    # Parse platforms
+    platforms_match = re.search(r'Platforms:\*?\*?\s*([A-Za-z0-9, ]+)', text)
+    if platforms_match:
+        signal.platforms = platforms_match.group(1).strip()
+    
+    return signal
+
+
+def parse_close_signal_to_db(text: str, message_id: int, signal_date: datetime) -> Optional[AgentPearSignal]:
+    """Parse a CLOSE signal message for database storage"""
+    if not text.lower().startswith('closing'):
+        return None
+    
+    signal = AgentPearSignal(
+        message_id=message_id,
+        signal_type="CLOSE",
+        signal_date=signal_date,
+        raw_message=text[:2000]
+    )
+    
+    # Parse pair and timeframe
+    pair_match = re.search(r'Closing\s+([A-Z0-9]+)/([A-Z0-9]+)\s*\((\w+)\)', text, re.IGNORECASE)
+    if pair_match:
+        signal.long_asset = pair_match.group(1)
+        signal.short_asset = pair_match.group(2)
+        signal.timeframe = pair_match.group(3)
+    else:
+        pair_match = re.search(r'Closing\s+([A-Z0-9]+)/([A-Z0-9]+)', text, re.IGNORECASE)
+        if pair_match:
+            signal.long_asset = pair_match.group(1)
+            signal.short_asset = pair_match.group(2)
+        else:
+            return None
+    
+    # Parse close reason
+    reason_match = re.search(r'due to\s+([^.]+)', text, re.IGNORECASE)
+    if reason_match:
+        signal.close_reason = reason_match.group(1).strip()
+    
+    # Parse exit and entry prices
+    prices_match = re.search(r'Exit\s+\$?([0-9.]+)\s+from\s+entry\s+\$?([0-9.]+)', text, re.IGNORECASE)
+    if prices_match:
+        signal.exit_price = float(prices_match.group(1))
+        signal.entry_price = float(prices_match.group(2))
+    
+    # Parse z-scores
+    zscore_match = re.search(r'entry\s+z=([+-]?[0-9.]+),?\s*exit\s+z=([+-]?[0-9.]+)', text, re.IGNORECASE)
+    if zscore_match:
+        signal.entry_z_score = float(zscore_match.group(1))
+        signal.exit_z_score = float(zscore_match.group(2))
+    
+    # Parse result
+    result_match = re.search(r'Result:\s*(profit|loss)', text, re.IGNORECASE)
+    if result_match:
+        signal.result = result_match.group(1).lower()
+    
+    # Parse max returns
+    returns_match = re.search(r'Max attainable returns:\s*([+-]+)?([0-9.]+)%\s*@(\d+)x', text, re.IGNORECASE)
+    if returns_match:
+        sign = returns_match.group(1) or '+'
+        value = float(returns_match.group(2))
+        if '--' in sign or sign == '-':
+            value = -value
+        signal.max_returns_pct = value
+        signal.leverage_used = int(returns_match.group(3))
+    
+    return signal
+
+
 async def handle_new_message(event, source_channel: str):
-    """Handle new messages from @agentpear"""
+    """Handle new messages from @agentpear - save ALL signals to DB, but only notify for OPEN signals"""
     try:
         text = event.message.text
         if not text:
             return
         
+        message_id = event.message.id
+        signal_date = event.message.date
+        
         logger.info(f"")
         logger.info(f"{'='*60}")
         logger.info(f"[PEAR_MONITOR] 🍐 NEW MESSAGE FROM {source_channel}")
         logger.info(f"{'='*60}")
+        logger.info(f"[PEAR_MONITOR] Message ID: {message_id}")
         logger.info(f"[PEAR_MONITOR] {text[:200]}..." if len(text) > 200 else f"[PEAR_MONITOR] {text}")
         
-        # Parse signal
+        # Save ALL signals to database (both OPEN and CLOSE) for metrics tracking
+        db_signal = save_signal_to_db(text, message_id, signal_date)
+        if db_signal:
+            logger.info(f"[PEAR_MONITOR] 💾 {db_signal.signal_type} signal saved to database")
+        
+        # Filter out close/exit messages - we only want to NOTIFY about NEW trades
+        if is_close_message(text):
+            logger.info(f"[PEAR_MONITOR] ⏭️ CLOSE message saved to DB but not broadcasting (not a new trade opportunity)")
+            logger.info(f"{'='*60}")
+            return
+        
+        # Parse signal for broadcasting
         signal = parse_signal_from_text(text)
         
         if signal:
-            logger.info(f"[PEAR_MONITOR] ✅ SIGNAL DETECTED!")
+            logger.info(f"[PEAR_MONITOR] ✅ OPEN SIGNAL DETECTED!")
             logger.info(f"[PEAR_MONITOR]    Long:  {signal['long_asset']}")
             logger.info(f"[PEAR_MONITOR]    Short: {signal['short_asset']}")
             if 'z_score' in signal:

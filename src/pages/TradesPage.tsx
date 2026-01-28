@@ -12,15 +12,46 @@ import { SegmentedSwitch } from '../components/ui/SegmentedSwitch'
 import { TradeCard } from '../components/trade/TradeCard'
 import { PerformanceChart } from '../components/trade/PerformanceChart'
 import { ShimmerTradeCard } from '../components/ui/Shimmer'
-import { 
-  fetchTrades, 
-  formatCurrency, 
-  type Trade as ApiTrade
-} from '../lib/api'
-import { availableCoins, type Coin } from '../lib/mockData'
+import { formatCurrency, fetchTrades, type Trade as ApiTrade } from '../lib/api'
 import { hapticFeedback } from '../lib/telegram'
+import { availableCoins } from '../lib/mockData'
 
 type TabValue = 'Open' | 'Closed'
+
+// Agent Pear Signal from API
+interface PearSignal {
+  id: number
+  message_id: number
+  signal_type: 'OPEN' | 'CLOSE'
+  long_asset: string
+  short_asset: string
+  entry_price: number | null
+  exit_price: number | null
+  z_score: number | null
+  rolling_z_score: number | null
+  correlation: number | null
+  cointegration: boolean | null
+  hedge_ratio: number | null
+  long_weight: number | null
+  short_weight: number | null
+  expected_reversion_days: number | null
+  backtest_win_rate: number | null
+  platforms: string | null
+  timeframe: string | null
+  result: 'profit' | 'loss' | null
+  max_returns_pct: number | null
+  leverage_used: number | null
+  close_reason: string | null
+  signal_date: string
+  created_at: string
+}
+
+// Coin type for display
+interface Coin {
+  name: string
+  ticker: string
+  price: number
+}
 
 // Frontend Trade type for TradeCard component
 interface DisplayTrade {
@@ -50,9 +81,56 @@ interface DisplayTrade {
   expiresAt?: Date
 }
 
-// Convert API trade to display format
-function convertApiToDisplay(apiTrade: ApiTrade): DisplayTrade {
-  // Handle both nested pair format and flat format from backend
+// Convert Agent Pear signal to display format
+function convertPearSignalToDisplay(signal: PearSignal): DisplayTrade {
+  const longCoin: Coin = {
+    name: signal.long_asset,
+    ticker: signal.long_asset,
+    price: signal.entry_price || 0
+  }
+  
+  const shortCoin: Coin = {
+    name: signal.short_asset,
+    ticker: signal.short_asset,
+    price: signal.entry_price || 0
+  }
+  
+  // OPEN signals are "open", CLOSE signals are "closed"
+  const status: 'open' | 'closed' = signal.signal_type === 'OPEN' ? 'open' : 'closed'
+  
+  // Calculate P&L from max_returns_pct for CLOSE signals
+  const pnlPct = signal.max_returns_pct || 0
+  const pnlUsd = pnlPct // Using percentage as proxy since we don't have actual USD amounts
+  
+  return {
+    id: `pear-${signal.id}`,
+    longCoin,
+    shortCoin,
+    notionalUsd: 0, // Not available from Pear signals
+    leverage: signal.leverage_used || 2,
+    pnlUsd: signal.result === 'profit' ? Math.abs(pnlPct) : -Math.abs(pnlPct),
+    pnlPct: signal.result === 'profit' ? Math.abs(pnlPct) : -Math.abs(pnlPct),
+    status,
+    details: {
+      takeProfitPct: 0,
+      stopLossPct: 0,
+      currentPriceLong: signal.exit_price || signal.entry_price || 0,
+      currentPriceShort: signal.exit_price || signal.entry_price || 0,
+      entryPriceLong: signal.entry_price || 0,
+      entryPriceShort: signal.entry_price || 0,
+      orderId: `MSG-${signal.message_id}`,
+      strategyTag: signal.close_reason || 'Pear Statistical Arbitrage',
+      correlation: signal.correlation || 0,
+      cointegration: signal.cointegration || false,
+      halfLife: signal.expected_reversion_days || 0
+    },
+    openedAt: new Date(signal.signal_date),
+    createdAt: new Date(signal.created_at),
+  }
+}
+
+// Convert user's API trade to display format
+function convertApiTradeToDisplay(apiTrade: ApiTrade): DisplayTrade {
   let longSymbol: string
   let shortSymbol: string
   let longNotional: number
@@ -60,14 +138,12 @@ function convertApiToDisplay(apiTrade: ApiTrade): DisplayTrade {
   let leverage: number
   
   if (apiTrade.pair) {
-    // Nested format: { pair: { long: {...}, short: {...} } }
     longSymbol = apiTrade.pair.long.symbol.replace('-PERP', '')
     shortSymbol = apiTrade.pair.short.symbol.replace('-PERP', '')
     longNotional = apiTrade.pair.long.notional
     shortNotional = apiTrade.pair.short.notional
     leverage = apiTrade.pair.long.leverage
   } else {
-    // Flat format: { pairLongSymbol, pairShortSymbol, ... }
     longSymbol = (apiTrade.pairLongSymbol || '').replace('-PERP', '')
     shortSymbol = (apiTrade.pairShortSymbol || '').replace('-PERP', '')
     longNotional = apiTrade.pairLongNotional || 0
@@ -87,19 +163,15 @@ function convertApiToDisplay(apiTrade: ApiTrade): DisplayTrade {
     price: 0
   }
   
-  // Map status to display format
-  const status: 'open' | 'closed' = 
-    apiTrade.status === 'EXECUTED' ? 'open' : 'closed'
-  
   return {
     id: apiTrade.tradeId,
     longCoin,
     shortCoin,
     notionalUsd: longNotional + shortNotional,
     leverage,
-    pnlUsd: 0, // TODO: Calculate from current prices
+    pnlUsd: 0,
     pnlPct: 0,
-    status,
+    status: 'open' as const,
     details: {
       takeProfitPct: (apiTrade.takeProfitRatio || 0.1) * 100,
       stopLossPct: (apiTrade.stopLossRatio || -0.05) * 100,
@@ -108,7 +180,7 @@ function convertApiToDisplay(apiTrade: ApiTrade): DisplayTrade {
       entryPriceLong: longCoin.price,
       entryPriceShort: shortCoin.price,
       orderId: apiTrade.tradeId,
-      strategyTag: apiTrade.basketCategory || 'AI Signal',
+      strategyTag: apiTrade.basketCategory || 'User Trade',
       correlation: 0.85,
       cointegration: true,
       halfLife: 1.2
@@ -121,29 +193,50 @@ function convertApiToDisplay(apiTrade: ApiTrade): DisplayTrade {
 
 export function TradesPage() {
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState<TabValue>('Open')
+  const [activeTab, setActiveTab] = useState<TabValue>('Closed')
   const [searchQuery, setSearchQuery] = useState('')
   const [showChart, setShowChart] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [allTrades, setAllTrades] = useState<DisplayTrade[]>([])
+  const [closedTrades, setClosedTrades] = useState<DisplayTrade[]>([])
+  const [openTrades, setOpenTrades] = useState<DisplayTrade[]>([])
+  const [chartData, setChartData] = useState<any>(null)
   
-  // Fetch trades from PostgreSQL
+  // Fetch data from database
   const loadTrades = async () => {
     setLoading(true)
     setError(null)
     
     try {
-      console.log('[TradesPage] 📊 Fetching trades from PostgreSQL...')
-      const apiTrades = await fetchTrades()
-      console.log('[TradesPage] ✅ Received', apiTrades.length, 'trades from database')
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
       
-      const displayTrades = apiTrades.map(convertApiToDisplay)
-      setAllTrades(displayTrades)
+      // Fetch last 30 CLOSED signals from Agent Pear (for history)
+      console.log('[TradesPage] 📊 Fetching closed signals from Agent Pear...')
+      const closedResponse = await fetch(`${backendUrl}/api/pear-signals/history?limit=30&signal_type=CLOSE`)
+      if (closedResponse.ok) {
+        const closedSignals: PearSignal[] = await closedResponse.json()
+        console.log('[TradesPage] ✅ Received', closedSignals.length, 'closed signals')
+        setClosedTrades(closedSignals.map(convertPearSignalToDisplay))
+      }
+      
+      // Fetch USER's open positions (from trades table, status=EXECUTED)
+      console.log('[TradesPage] 📊 Fetching user open positions...')
+      const userTrades = await fetchTrades(undefined, 'EXECUTED')
+      console.log('[TradesPage] ✅ Received', userTrades.length, 'user open positions')
+      setOpenTrades(userTrades.map(convertApiTradeToDisplay))
+      
+      // Fetch chart data from full database
+      console.log('[TradesPage] 📊 Fetching chart data...')
+      const chartResponse = await fetch(`${backendUrl}/api/pear-signals/chart-data?days=365`)
+      if (chartResponse.ok) {
+        const data = await chartResponse.json()
+        setChartData(data)
+        console.log('[TradesPage] ✅ Chart data loaded:', data.stats)
+      }
+      
     } catch (err) {
-      console.error('[TradesPage] ❌ Error fetching trades:', err)
+      console.error('[TradesPage] ❌ Error fetching data:', err)
       setError(err instanceof Error ? err.message : 'Failed to load trades')
-      setAllTrades([])
     } finally {
       setLoading(false)
     }
@@ -153,11 +246,10 @@ export function TradesPage() {
     loadTrades()
   }, [])
   
-  // Filter trades by status
+  // Get trades based on active tab
   const filteredTrades = useMemo(() => {
-    const statusFilter = activeTab === 'Open' ? 'open' : 'closed'
-    return allTrades.filter(t => t.status === statusFilter)
-  }, [allTrades, activeTab])
+    return activeTab === 'Open' ? openTrades : closedTrades
+  }, [activeTab, openTrades, closedTrades])
   
   // Search filter
   const trades = useMemo(() => {
@@ -250,13 +342,14 @@ export function TradesPage() {
           <div className="flex gap-2">
             <button
               onClick={handleToggleChart}
-              className={`p-2 rounded-xl transition-colors ${
+              className={`px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all ${
                 showChart 
-                  ? 'bg-accent-primary text-white' 
-                  : 'bg-bg-secondary text-text-muted hover:text-text-primary'
+                  ? 'bg-accent-primary text-black shadow-lg shadow-accent-primary/30' 
+                  : 'bg-accent-primary/20 text-accent-primary border border-accent-primary/30 hover:bg-accent-primary/30'
               }`}
             >
               <BarChart3 className="w-5 h-5" />
+              <span className="text-sm">Chart</span>
             </button>
             <button
               onClick={handleRefresh}
@@ -281,11 +374,12 @@ export function TradesPage() {
           </div>
         </div>
         
-        {/* Performance chart */}
+        {/* Performance chart - uses full DB data */}
         {showChart && (
           <PerformanceChart 
             isOpen={showChart}
-            trades={filteredTrades}
+            trades={closedTrades}
+            apiChartData={chartData}
             onClose={() => setShowChart(false)}
           />
         )}
@@ -295,8 +389,8 @@ export function TradesPage() {
           value={activeTab}
           onChange={handleTabChange}
           options={[
-            { value: 'Open', label: 'Open', count: allTrades.filter(t => t.status === 'open').length },
-            { value: 'Closed', label: 'Closed', count: allTrades.filter(t => t.status === 'closed').length }
+            { value: 'Open', label: 'Open', count: openTrades.length },
+            { value: 'Closed', label: 'Closed', count: closedTrades.length }
           ]}
         />
         

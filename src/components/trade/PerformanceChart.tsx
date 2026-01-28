@@ -1,14 +1,40 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { X, TrendingUp, TrendingDown, Sparkles } from 'lucide-react'
-import { formatCurrency, type Trade } from '../../lib/mockData'
 import { hapticFeedback } from '../../lib/telegram'
 
+// Local formatCurrency function
+function formatCurrency(value: number, decimals = 2): string {
+  if (Math.abs(value) >= 1000) {
+    return `$${value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
+  }
+  return `$${value.toFixed(decimals)}`
+}
+
 type TimeRange = '1D' | '1W' | '1M' | '3M' | 'ALL'
+
+// Chart data from API
+interface ChartDataFromAPI {
+  data_points: Array<{
+    date: string
+    pnl: number
+    cumulative: number
+    pair: string
+    result: string
+  }>
+  stats: {
+    total_trades: number
+    wins: number
+    losses: number
+    win_rate: number
+    total_pnl: number
+  }
+}
 
 interface PerformanceChartProps {
   isOpen: boolean
   onClose: () => void
-  trades?: Trade[]  // Now accepts trades from API
+  trades?: any[]
+  apiChartData?: ChartDataFromAPI | null  // Full DB chart data from API
 }
 
 interface DataPoint {
@@ -18,7 +44,7 @@ interface DataPoint {
   label: string
 }
 
-export function PerformanceChart({ isOpen, onClose, trades = [] }: PerformanceChartProps) {
+export function PerformanceChart({ isOpen, onClose, trades = [], apiChartData }: PerformanceChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>('1M')
   const [isAnimating, setIsAnimating] = useState(false)
   const [showLine, setShowLine] = useState(false)
