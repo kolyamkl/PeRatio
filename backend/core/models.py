@@ -97,6 +97,19 @@ class NotificationSetting(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
 
 
+class WalletUser(SQLModel, table=True):
+    """
+    Links wallet addresses to Telegram users for notifications.
+    Each wallet can be linked to one Telegram user.
+    """
+    wallet_address: str = Field(primary_key=True, index=True)  # Ethereum address (lowercase)
+    telegram_user_id: str = Field(index=True)  # Telegram user ID
+    telegram_chat_id: str  # Telegram chat ID for sending messages
+    telegram_username: Optional[str] = Field(default=None)  # @username if available
+    created_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    updated_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+
+
 class AgentPearSignal(SQLModel, table=True):
     """
     Stores all Agent Pear signals from Telegram for metrics calculation.

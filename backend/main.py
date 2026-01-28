@@ -22,7 +22,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 
 from core.config import get_settings
 from core.database import engine, get_session, init_db
-from core.models import NotificationSetting, Trade, AgentPearSignal
+from core.models import NotificationSetting, Trade, AgentPearSignal, WalletUser
 
 # Security: Import security middleware and utilities
 from security import (
@@ -66,6 +66,8 @@ def get_latest_pear_telegram_signal() -> Optional[Dict[str, Any]]:
     except Exception as e:
         logging.getLogger(__name__).error(f"Error reading pear signal file: {e}")
         return None
+
+from pydantic import BaseModel, Field as PydanticField
 
 from core.schemas import (
     ExecuteTradeRequest,
@@ -1408,7 +1410,130 @@ def execute_trade(
     session.refresh(trade)
 
     logger.info(f"[EXECUTE] ✅ Trade {trade_id} executed successfully - status: {trade.status}")
+    
+    # Send Telegram notification to the user who owns this wallet
+    if payload.walletAddress and trade.status == "EXECUTED":
+        wallet_address = payload.walletAddress.lower()
+        wallet_user = session.get(WalletUser, wallet_address)
+        
+        if wallet_user and telegram_app:
+            try:
+                # Format notification message
+                long_symbol = trade.pair_long_symbol.replace("-PERP", "")
+                short_symbol = trade.pair_short_symbol.replace("-PERP", "")
+                notional = trade.pair_long_notional + trade.pair_short_notional
+                leverage = trade.pair_long_leverage
+                tp_pct = abs(trade.take_profit_ratio * 100)
+                sl_pct = abs(trade.stop_loss_ratio * 100)
+                
+                message = (
+                    f"🚀 *Trade Executed Successfully!*\n\n"
+                    f"📊 *Pair:* {long_symbol} / {short_symbol}\n"
+                    f"💰 *Size:* ${notional:,.2f}\n"
+                    f"⚡ *Leverage:* {leverage}x\n"
+                    f"🎯 *Take Profit:* +{tp_pct:.1f}%\n"
+                    f"🛡️ *Stop Loss:* -{sl_pct:.1f}%\n\n"
+                    f"📝 *Trade ID:* `{trade_id[:8]}...`\n"
+                    f"🔗 *Wallet:* `{wallet_address[:10]}...`"
+                )
+                
+                # Send async notification
+                import asyncio
+                async def send_notification():
+                    await telegram_app.bot.send_message(
+                        chat_id=wallet_user.telegram_chat_id,
+                        text=message,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                
+                # Run in event loop
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(send_notification())
+                else:
+                    loop.run_until_complete(send_notification())
+                    
+                logger.info(f"[EXECUTE] 📱 Telegram notification sent to chat {wallet_user.telegram_chat_id}")
+            except Exception as e:
+                logger.error(f"[EXECUTE] ⚠️ Failed to send Telegram notification: {e}")
+        else:
+            logger.info(f"[EXECUTE] ℹ️ No Telegram user linked to wallet {wallet_address[:10]}...")
+    
     return trade_to_response(trade)
+
+
+class LinkWalletRequest(BaseModel):
+    """Request to link a wallet address to a Telegram user"""
+    walletAddress: str = PydanticField(..., min_length=42, max_length=42)
+    telegramUserId: str
+    telegramChatId: str
+    telegramUsername: Optional[str] = None
+
+
+@app.post("/api/wallet/link")
+def link_wallet_to_telegram(
+    payload: LinkWalletRequest, session: Session = Depends(get_session)
+) -> Any:
+    """
+    Link a wallet address to a Telegram user for notifications.
+    This should be called when a user connects their wallet in the Telegram mini app.
+    """
+    wallet_address = payload.walletAddress.lower()  # Normalize to lowercase
+    
+    logger.info(f"[WALLET-LINK] 🔗 Linking wallet {wallet_address[:10]}... to Telegram user {payload.telegramUserId}")
+    
+    # Check if wallet already linked
+    existing = session.get(WalletUser, wallet_address)
+    now = datetime.utcnow()
+    
+    if existing:
+        # Update existing link
+        existing.telegram_user_id = payload.telegramUserId
+        existing.telegram_chat_id = payload.telegramChatId
+        existing.telegram_username = payload.telegramUsername
+        existing.updated_at = now
+        session.add(existing)
+        logger.info(f"[WALLET-LINK] ✅ Updated existing wallet link")
+    else:
+        # Create new link
+        wallet_user = WalletUser(
+            wallet_address=wallet_address,
+            telegram_user_id=payload.telegramUserId,
+            telegram_chat_id=payload.telegramChatId,
+            telegram_username=payload.telegramUsername,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(wallet_user)
+        logger.info(f"[WALLET-LINK] ✅ Created new wallet link")
+    
+    session.commit()
+    
+    return {
+        "success": True,
+        "walletAddress": wallet_address,
+        "telegramUserId": payload.telegramUserId,
+        "message": "Wallet linked to Telegram successfully"
+    }
+
+
+@app.get("/api/wallet/link/{wallet_address}")
+def get_wallet_link(
+    wallet_address: str = Path(...), session: Session = Depends(get_session)
+) -> Any:
+    """Get the Telegram user linked to a wallet address"""
+    wallet_address = wallet_address.lower()
+    wallet_user = session.get(WalletUser, wallet_address)
+    
+    if not wallet_user:
+        raise HTTPException(status_code=404, detail="Wallet not linked to any Telegram user")
+    
+    return {
+        "walletAddress": wallet_user.wallet_address,
+        "telegramUserId": wallet_user.telegram_user_id,
+        "telegramChatId": wallet_user.telegram_chat_id,
+        "telegramUsername": wallet_user.telegram_username
+    }
 
 
 @app.post(

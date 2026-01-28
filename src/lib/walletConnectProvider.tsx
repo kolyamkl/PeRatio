@@ -7,11 +7,12 @@
  * - Device detection and automatic flow selection
  */
 
-import { createContext, useContext, ReactNode, useEffect, useState, useCallback } from 'react'
+import { createContext, useContext, ReactNode, useEffect, useState, useCallback, useRef } from 'react'
 import { useAccount, useConnect, useDisconnect, useBalance } from 'wagmi'
 import { useWeb3Modal } from '@web3modal/wagmi/react'
 import { getDeviceInfo, logDeviceInfo } from './deviceDetection'
 import { openWalletApp, WalletType } from './walletConnectConfig'
+import { getTelegramUserInfo } from './telegram'
 
 export interface WalletState {
   isConnected: boolean
@@ -65,10 +66,60 @@ export function WalletConnectProvider({ children }: WalletProviderProps) {
 
   const [error, setError] = useState<string | null>(null)
 
+  // Track if we've already linked this wallet
+  const linkedWalletRef = useRef<string | null>(null)
+  
   // Log device info on mount
   useEffect(() => {
     logDeviceInfo()
   }, [])
+  
+  // Link wallet to Telegram user when connected
+  useEffect(() => {
+    const linkWalletToTelegram = async () => {
+      if (!isConnected || !address) return
+      
+      // Skip if already linked this wallet
+      if (linkedWalletRef.current === address.toLowerCase()) {
+        console.log('[WalletConnect] Wallet already linked, skipping')
+        return
+      }
+      
+      const telegramUser = getTelegramUserInfo()
+      
+      if (!telegramUser.userId || !telegramUser.chatId) {
+        console.log('[WalletConnect] No Telegram user info available, skipping wallet link')
+        return
+      }
+      
+      try {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+        console.log(`[WalletConnect] 🔗 Linking wallet ${address.slice(0, 10)}... to Telegram user ${telegramUser.userId}`)
+        
+        const response = await fetch(`${backendUrl}/api/wallet/link`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            walletAddress: address,
+            telegramUserId: telegramUser.userId,
+            telegramChatId: telegramUser.chatId,
+            telegramUsername: telegramUser.username
+          })
+        })
+        
+        if (response.ok) {
+          linkedWalletRef.current = address.toLowerCase()
+          console.log('[WalletConnect] ✅ Wallet linked to Telegram successfully')
+        } else {
+          console.error('[WalletConnect] ❌ Failed to link wallet:', await response.text())
+        }
+      } catch (err) {
+        console.error('[WalletConnect] ❌ Error linking wallet to Telegram:', err)
+      }
+    }
+    
+    linkWalletToTelegram()
+  }, [isConnected, address])
 
   // Format display address
   const displayAddress = address
