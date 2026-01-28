@@ -1,68 +1,11 @@
 import { useState, useMemo, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Search, TrendingUp, TrendingDown, Star, Flame, Cpu, Coins, Gamepad2, Layers } from 'lucide-react'
+import { X, Search, TrendingUp, TrendingDown, Star } from 'lucide-react'
 import { type Coin } from '../../lib/mockData'
 import { hapticFeedback } from '../../lib/telegram'
 import { fetchPrices, formatPrice } from '../../lib/priceService'
-
-// Coin icons as simple colored circles with letters or symbols
-const CoinIcon = ({ ticker, size = 32 }: { ticker: string; size?: number }) => {
-  const colors: Record<string, string> = {
-    BTC: 'bg-orange-500',
-    ETH: 'bg-blue-500',
-    SOL: 'bg-gradient-to-br from-purple-500 to-cyan-400',
-    AVAX: 'bg-red-500',
-    ARB: 'bg-blue-400',
-    OP: 'bg-red-500',
-    DOT: 'bg-pink-500',
-    LINK: 'bg-blue-600',
-    MATIC: 'bg-purple-600',
-    ADA: 'bg-blue-400',
-    XRP: 'bg-gray-400',
-    DOGE: 'bg-yellow-500',
-    SHIB: 'bg-orange-400',
-    APE: 'bg-blue-700',
-    YGG: 'bg-purple-500',
-    IMX: 'bg-cyan-500',
-    GMT: 'bg-yellow-600',
-    SUPER: 'bg-purple-400',
-    GALA: 'bg-gray-600',
-    ACE: 'bg-gray-500',
-    XAI: 'bg-red-600',
-    MAVIA: 'bg-indigo-500',
-    NOT: 'bg-black',
-    HMSTR: 'bg-orange-600',
-    SAND: 'bg-cyan-400',
-    ATOM: 'bg-purple-700',
-    UNI: 'bg-pink-600',
-    AAVE: 'bg-cyan-600',
-    SUI: 'bg-blue-500',
-    APT: 'bg-black',
-    SEI: 'bg-red-400',
-    INJ: 'bg-blue-600',
-    TIA: 'bg-purple-500',
-    NEAR: 'bg-black',
-    TAO: 'bg-black',
-    WLD: 'bg-black',
-    PEPE: 'bg-green-500',
-    WIF: 'bg-amber-500',
-    BONK: 'bg-orange-500',
-    FLOKI: 'bg-yellow-600',
-    RNDR: 'bg-red-500',
-    FET: 'bg-purple-500',
-  }
-
-  const bgColor = colors[ticker] || 'bg-accent-primary/20'
-
-  return (
-    <div 
-      className={`${bgColor} rounded-full flex items-center justify-center font-bold text-white shadow-lg`}
-      style={{ width: size, height: size, fontSize: size * 0.35 }}
-    >
-      {ticker.slice(0, 2)}
-    </div>
-  )
-}
+import { fetchAllAssets, assetCategories, type Asset } from '../../lib/assetService'
+import { CoinIcon } from '../common/CoinIcon'
 
 interface CoinSelectModalProps {
   isOpen: boolean
@@ -72,86 +15,36 @@ interface CoinSelectModalProps {
   excludeCoins?: string[]
 }
 
-// Extended coin list with categories
-const allCoinsData: (Coin & { category: string[] })[] = [
-  // Crypto majors
-  { name: 'Bitcoin', ticker: 'BTC', price: 43250.50, category: ['all', 'hot', 'defi'] },
-  { name: 'Ethereum', ticker: 'ETH', price: 2450.00, category: ['all', 'hot', 'defi'] },
-  { name: 'Solana', ticker: 'SOL', price: 98.50, category: ['all', 'hot', 'hip3'] },
-  { name: 'Avalanche', ticker: 'AVAX', price: 35.80, category: ['all', 'hot'] },
-  { name: 'Arbitrum', ticker: 'ARB', price: 0.80, category: ['all', 'hot', 'defi'] },
-  { name: 'Optimism', ticker: 'OP', price: 1.80, category: ['all', 'hot', 'defi'] },
-  { name: 'Polkadot', ticker: 'DOT', price: 7.25, category: ['all', 'defi'] },
-  { name: 'Chainlink', ticker: 'LINK', price: 14.80, category: ['all', 'defi', 'ai'] },
-  { name: 'Polygon', ticker: 'MATIC', price: 0.85, category: ['all', 'defi'] },
-  { name: 'Cardano', ticker: 'ADA', price: 0.52, category: ['all'] },
-  { name: 'Ripple', ticker: 'XRP', price: 0.62, category: ['all'] },
-  { name: 'Cosmos', ticker: 'ATOM', price: 9.50, category: ['all', 'defi'] },
-  { name: 'Uniswap', ticker: 'UNI', price: 6.25, category: ['all', 'defi'] },
-  { name: 'Aave', ticker: 'AAVE', price: 92.30, category: ['all', 'defi'] },
-  { name: 'Sui', ticker: 'SUI', price: 1.20, category: ['all', 'hot', 'hip3'] },
-  { name: 'Aptos', ticker: 'APT', price: 8.50, category: ['all', 'hot', 'hip3'] },
-  { name: 'Sei', ticker: 'SEI', price: 0.45, category: ['all', 'hot', 'hip3'] },
-  { name: 'Injective', ticker: 'INJ', price: 22.50, category: ['all', 'hot', 'defi'] },
-  { name: 'Celestia', ticker: 'TIA', price: 8.20, category: ['all', 'hot'] },
-  { name: 'Near', ticker: 'NEAR', price: 4.80, category: ['all', 'defi'] },
-  // Gaming
-  { name: 'ApeCoin', ticker: 'APE', price: 1.85, category: ['all', 'gaming'] },
-  { name: 'Yield Guild', ticker: 'YGG', price: 0.72, category: ['all', 'gaming'] },
-  { name: 'ImmutableX', ticker: 'IMX', price: 2.15, category: ['all', 'gaming', 'hip3'] },
-  { name: 'STEPN', ticker: 'GMT', price: 0.22, category: ['all', 'gaming'] },
-  { name: 'SuperVerse', ticker: 'SUPER', price: 0.95, category: ['all', 'gaming'] },
-  { name: 'Gala', ticker: 'GALA', price: 0.028, category: ['all', 'gaming'] },
-  { name: 'Ace', ticker: 'ACE', price: 5.60, category: ['all', 'gaming'] },
-  { name: 'Xai', ticker: 'XAI', price: 0.85, category: ['all', 'gaming', 'ai'] },
-  { name: 'Mavia', ticker: 'MAVIA', price: 3.20, category: ['all', 'gaming'] },
-  { name: 'Notcoin', ticker: 'NOT', price: 0.012, category: ['all', 'gaming', 'hot'] },
-  { name: 'Hamster', ticker: 'HMSTR', price: 0.005, category: ['all', 'gaming', 'hot'] },
-  { name: 'Sandbox', ticker: 'SAND', price: 0.45, category: ['all', 'gaming'] },
-  // AI tokens
-  { name: 'Render', ticker: 'RNDR', price: 7.50, category: ['all', 'ai'] },
-  { name: 'Fetch.ai', ticker: 'FET', price: 2.30, category: ['all', 'ai'] },
-  { name: 'Ocean', ticker: 'OCEAN', price: 0.95, category: ['all', 'ai'] },
-  { name: 'SingularityNET', ticker: 'AGIX', price: 0.88, category: ['all', 'ai'] },
-  { name: 'Bittensor', ticker: 'TAO', price: 450.00, category: ['all', 'ai', 'hot'] },
-  { name: 'Worldcoin', ticker: 'WLD', price: 2.20, category: ['all', 'ai'] },
-  // Memes
-  { name: 'Dogecoin', ticker: 'DOGE', price: 0.082, category: ['all', 'hot'] },
-  { name: 'Shiba Inu', ticker: 'SHIB', price: 0.000025, category: ['all', 'hot'] },
-  { name: 'Pepe', ticker: 'PEPE', price: 0.000012, category: ['all', 'hot'] },
-  { name: 'Dogwifhat', ticker: 'WIF', price: 2.50, category: ['all', 'hot'] },
-  { name: 'Bonk', ticker: 'BONK', price: 0.000025, category: ['all', 'hot'] },
-  { name: 'Floki', ticker: 'FLOKI', price: 0.00018, category: ['all', 'hot'] },
-]
-
-const categories = [
-  { id: 'favorites', label: 'Favorites', icon: Star },
-  { id: 'all', label: 'All Coins', icon: Coins },
-  { id: 'hot', label: 'Hot', icon: Flame, emoji: '🔥' },
-  { id: 'hip3', label: 'HIP-3', icon: Layers },
-  { id: 'ai', label: 'AI', icon: Cpu },
-  { id: 'defi', label: 'DeFi', icon: TrendingUp },
-  { id: 'gaming', label: 'Gaming', icon: Gamepad2 },
-]
+// Categories from asset service (already imported)
 
 export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins = [] }: CoinSelectModalProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeCategory, setActiveCategory] = useState('all')
   const [favorites, setFavorites] = useState<string[]>(['BTC', 'ETH', 'SOL'])
   const [livePrices, setLivePrices] = useState<Record<string, number>>({})
+  const [allAssets, setAllAssets] = useState<Asset[]>([])
+  const [loading, setLoading] = useState(true)
 
-  // Fetch real-time prices when modal opens
+  // Fetch assets and prices when modal opens
   useEffect(() => {
     if (isOpen) {
-      const tickers = allCoinsData.map(c => c.ticker)
-      fetchPrices(tickers).then(prices => {
+      setLoading(true)
+      
+      // Fetch all assets from Hyperliquid
+      fetchAllAssets().then(assets => {
+        setAllAssets(assets)
+        setLoading(false)
+      })
+      
+      // Fetch prices
+      fetchPrices().then(prices => {
         setLivePrices(prices)
       })
     }
   }, [isOpen])
 
   const filteredCoins = useMemo(() => {
-    let coins = allCoinsData.filter(coin => !excludeCoins.includes(coin.ticker))
+    let coins = allAssets.filter(coin => !excludeCoins.includes(coin.ticker))
     
     // Filter by category
     if (activeCategory === 'favorites') {
@@ -169,12 +62,14 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
       )
     }
     
-    // Update prices with live data
+    // Map to Coin type with live prices
     return coins.map(coin => ({
-      ...coin,
-      price: livePrices[coin.ticker] ?? coin.price
+      name: coin.name,
+      ticker: coin.ticker,
+      price: livePrices[coin.ticker] ?? 0,
+      category: coin.category,
     }))
-  }, [searchQuery, activeCategory, favorites, excludeCoins, livePrices])
+  }, [searchQuery, activeCategory, favorites, excludeCoins, livePrices, allAssets])
 
   const toggleFavorite = (ticker: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -268,7 +163,7 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
         {/* Categories */}
         <div className="px-4 py-3 border-b border-border overflow-x-auto flex-shrink-0">
           <div className="flex gap-2 min-w-max">
-            {categories.map((cat) => (
+            {assetCategories.map((cat) => (
               <button
                 key={cat.id}
                 onClick={() => {
@@ -296,7 +191,12 @@ export function CoinSelectModal({ isOpen, onClose, onSelect, type, excludeCoins 
 
         {/* Coins Grid */}
         <div className="flex-1 overflow-y-auto p-4">
-          {filteredCoins.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin w-8 h-8 border-2 border-accent-primary border-t-transparent rounded-full mx-auto mb-3" />
+              <p className="text-text-muted">Loading assets...</p>
+            </div>
+          ) : filteredCoins.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-text-muted">No tokens found</p>
             </div>

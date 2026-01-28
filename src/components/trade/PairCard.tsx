@@ -4,65 +4,18 @@ import type { Coin } from '../../lib/mockData'
 import { hapticFeedback } from '../../lib/telegram'
 import { CoinSelectModal } from './CoinSelectModal'
 import { fetchPrices, formatPrice } from '../../lib/priceService'
+import { CoinIcon } from '../common/CoinIcon'
 
-// Coin icon component
-const CoinIcon = ({ ticker, size = 40 }: { ticker: string; size?: number }) => {
-  const colors: Record<string, string> = {
-    BTC: 'bg-orange-500',
-    ETH: 'bg-blue-500',
-    SOL: 'bg-gradient-to-br from-purple-500 to-cyan-400',
-    AVAX: 'bg-red-500',
-    ARB: 'bg-blue-400',
-    OP: 'bg-red-500',
-    DOT: 'bg-pink-500',
-    LINK: 'bg-blue-600',
-    MATIC: 'bg-purple-600',
-    ADA: 'bg-blue-400',
-    XRP: 'bg-gray-400',
-    DOGE: 'bg-yellow-500',
-    SHIB: 'bg-orange-400',
-    APE: 'bg-blue-700',
-    YGG: 'bg-purple-500',
-    IMX: 'bg-cyan-500',
-    GMT: 'bg-yellow-600',
-    SUPER: 'bg-purple-400',
-    GALA: 'bg-gray-600',
-    ATOM: 'bg-purple-700',
-    UNI: 'bg-pink-600',
-    AAVE: 'bg-cyan-600',
-    SUI: 'bg-blue-500',
-    APT: 'bg-black',
-    SEI: 'bg-red-400',
-    INJ: 'bg-blue-600',
-    TIA: 'bg-purple-500',
-    NEAR: 'bg-black',
-    PEPE: 'bg-green-500',
-    WIF: 'bg-amber-500',
-    BONK: 'bg-orange-500',
-    FLOKI: 'bg-yellow-600',
-    TAO: 'bg-black',
-    WLD: 'bg-black',
-    RNDR: 'bg-red-500',
-    FET: 'bg-purple-500',
-  }
-
-  const bgColor = colors[ticker] || 'bg-accent-primary/30'
-
-  return (
-    <div 
-      className={`${bgColor} rounded-full flex items-center justify-center font-bold text-white shadow-lg`}
-      style={{ width: size, height: size, fontSize: size * 0.35 }}
-    >
-      {ticker.slice(0, 2)}
-    </div>
-  )
+// Extended coin type with weight
+export interface CoinWithWeight extends Coin {
+  weight: number
 }
 
 interface PairCardProps {
-  longCoins: Coin[]
-  shortCoins: Coin[]
-  onLongCoinsChange: (coins: Coin[]) => void
-  onShortCoinsChange: (coins: Coin[]) => void
+  longCoins: CoinWithWeight[]
+  shortCoins: CoinWithWeight[]
+  onLongCoinsChange: (coins: CoinWithWeight[]) => void
+  onShortCoinsChange: (coins: CoinWithWeight[]) => void
   onSwap: () => void
   marketType: 'Crypto' | 'Equity'
 }
@@ -119,14 +72,38 @@ export function PairCard({
 
   const handleAddCoin = (coin: Coin) => {
     hapticFeedback('selection')
+    // Add coin with default weight, then redistribute weights evenly
+    const coinWithWeight: CoinWithWeight = { ...coin, weight: 1 }
+    
     if (showCoinSelector === 'long') {
       if (!longCoins.find(c => c.ticker === coin.ticker)) {
-        onLongCoinsChange([...longCoins, coin])
+        const newCoins = [...longCoins, coinWithWeight]
+        // Redistribute weights evenly
+        const evenWeight = 100 / newCoins.length
+        onLongCoinsChange(newCoins.map(c => ({ ...c, weight: evenWeight })))
       }
     } else if (showCoinSelector === 'short') {
       if (!shortCoins.find(c => c.ticker === coin.ticker)) {
-        onShortCoinsChange([...shortCoins, coin])
+        const newCoins = [...shortCoins, coinWithWeight]
+        // Redistribute weights evenly
+        const evenWeight = 100 / newCoins.length
+        onShortCoinsChange(newCoins.map(c => ({ ...c, weight: evenWeight })))
       }
+    }
+  }
+
+  // Update weight for a specific coin
+  const handleWeightChange = (type: 'long' | 'short', ticker: string, newWeight: number) => {
+    hapticFeedback('selection')
+    const coins = type === 'long' ? longCoins : shortCoins
+    const updatedCoins = coins.map(c => 
+      c.ticker === ticker ? { ...c, weight: newWeight } : c
+    )
+    
+    if (type === 'long') {
+      onLongCoinsChange(updatedCoins)
+    } else {
+      onShortCoinsChange(updatedCoins)
     }
   }
 
@@ -134,10 +111,11 @@ export function PairCard({
     return [...longCoins, ...shortCoins].map(c => c.ticker)
   }
 
-  const renderCoinItem = (coin: Coin, type: 'long' | 'short', index: number, total: number) => {
+  const renderCoinItem = (coin: CoinWithWeight, type: 'long' | 'short', index: number, total: number) => {
     const isLong = type === 'long'
-    const allocation = Math.round(100 / total)
     const livePrice = getLivePrice(coin.ticker, coin.price)
+    // Use the coin's weight (stored as percentage 0-100)
+    const displayWeight = Math.round(coin.weight)
     
     return (
       <div 
@@ -171,9 +149,21 @@ export function PairCard({
         </div>
         
         <div className="flex items-center gap-2">
-          <span className={`text-sm font-bold ${isLong ? 'text-accent-success' : 'text-accent-danger'}`}>
-            {allocation}%
-          </span>
+          {/* Editable weight input */}
+          <div className="flex items-center">
+            <input
+              type="number"
+              value={displayWeight}
+              onChange={(e) => {
+                const val = Math.max(1, Math.min(100, parseInt(e.target.value) || 1))
+                handleWeightChange(type, coin.ticker, val)
+              }}
+              className={`w-12 text-right text-sm font-bold bg-transparent border-b border-dashed focus:outline-none focus:border-solid ${isLong ? 'text-accent-success border-accent-success/30' : 'text-accent-danger border-accent-danger/30'}`}
+              min="1"
+              max="100"
+            />
+            <span className={`text-sm font-bold ml-0.5 ${isLong ? 'text-accent-success' : 'text-accent-danger'}`}>%</span>
+          </div>
           
           {total > 1 && (
             <button

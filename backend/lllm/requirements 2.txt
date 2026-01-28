@@ -1,0 +1,29 @@
+# RATIO Bot Dependencies
+# ======================
+
+# Core
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# OpenAI API
+openai>=1.12.0
+
+# Retry logic
+backoff>=2.2.1
+
+# Data processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Scheduling
+schedule>=1.2.0
+
+# WebSocket support (for real-time data)
+websockets>=12.0
+
+# Logging
+colorlog>=6.7.0
+
+# Type hints
+typing-extensions>=4.8.0
+

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Settings } from 'lucide-react'
 import { TopBar } from '../components/layout/TopBar'
-import { PairCard } from '../components/trade/PairCard'
+import { PairCard, type CoinWithWeight } from '../components/trade/PairCard'
 import { ParamsCard } from '../components/trade/ParamsCard'
 import { StickyConfirm } from '../components/trade/StickyConfirm'
 import { SettingsModal } from '../components/ui/SettingsModal'
@@ -45,19 +45,21 @@ export function TradeConfirmPage() {
   const [betAmount, setBetAmount] = useState(20) // Default $20 total ($10 per side) - matches backend cap
 
   // Get initial coins with prices - handles both "BTC" and "BTC-PERP" formats
-  const getInitialCoin = (symbol: string): Coin => {
+  const getInitialCoin = (symbol: string, weight: number = 100): CoinWithWeight => {
     // Strip -PERP suffix if present (backend uses BTC-PERP, frontend uses BTC)
     const ticker = symbol.replace(/-PERP$/i, '')
     const found = availableCoins.find(c => c.ticker.toUpperCase() === ticker.toUpperCase())
-    return found || { name: ticker, ticker, price: 0 }
+    return found 
+      ? { ...found, weight } 
+      : { name: ticker, ticker, price: 0, weight }
   }
 
-  const [longCoins, setLongCoins] = useState<Coin[]>([
-    getInitialCoin('BTC')
+  const [longCoins, setLongCoins] = useState<CoinWithWeight[]>([
+    getInitialCoin('BTC', 100)
   ])
   
-  const [shortCoins, setShortCoins] = useState<Coin[]>([
-    getInitialCoin('ETH')
+  const [shortCoins, setShortCoins] = useState<CoinWithWeight[]>([
+    getInitialCoin('ETH', 100)
   ])
 
   // State to store tradeId from URL
@@ -139,26 +141,32 @@ export function TradeConfirmPage() {
       if (longBasketStr) {
         // URL decode and parse
         const decoded = decodeURIComponent(longBasketStr)
-        const longBasketData = eval(decoded) // Safe since it's our own data
+        const longBasketData = JSON.parse(decoded)
         console.log('[TradeConfirm] 📗 Setting long basket from URL:', longBasketData)
         setLongBasket(longBasketData)
         
-        // Set long coins for display
+        // Set long coins for display with weights (convert weight 0-1 to percentage 0-100)
         if (longBasketData.length > 0) {
-          const coins = longBasketData.map((a: any) => getInitialCoin(a.coin))
+          const totalWeight = longBasketData.reduce((sum: number, a: any) => sum + (a.weight || 1), 0)
+          const coins = longBasketData.map((a: any) => 
+            getInitialCoin(a.coin, ((a.weight || 1) / totalWeight) * 100)
+          )
           setLongCoins(coins)
         }
       }
       
       if (shortBasketStr) {
         const decoded = decodeURIComponent(shortBasketStr)
-        const shortBasketData = eval(decoded)
+        const shortBasketData = JSON.parse(decoded)
         console.log('[TradeConfirm] 📕 Setting short basket from URL:', shortBasketData)
         setShortBasket(shortBasketData)
         
-        // Set short coins for display
+        // Set short coins for display with weights
         if (shortBasketData.length > 0) {
-          const coins = shortBasketData.map((a: any) => getInitialCoin(a.coin))
+          const totalWeight = shortBasketData.reduce((sum: number, a: any) => sum + (a.weight || 1), 0)
+          const coins = shortBasketData.map((a: any) => 
+            getInitialCoin(a.coin, ((a.weight || 1) / totalWeight) * 100)
+          )
           setShortCoins(coins)
         }
       }
@@ -396,12 +404,22 @@ export function TradeConfirmPage() {
           },
           takeProfitRatio: takeProfit / 100,
           stopLossRatio: -stopLoss / 100,
-          longBasket: longBasket.length > 0 
-            ? longBasket.map(a => ({ coin: a.coin, weight: a.weight }))
-            : [{ coin: longCoins[0]?.ticker || 'BTC', weight: 1.0 }],
-          shortBasket: shortBasket.length > 0
-            ? shortBasket.map(a => ({ coin: a.coin, weight: a.weight }))
-            : [{ coin: shortCoins[0]?.ticker || 'ETH', weight: 1.0 }],
+          // Use current UI state (longCoins/shortCoins) with their weights
+          // Normalize weights to sum to 1.0 for each side
+          longBasket: (() => {
+            const totalWeight = longCoins.reduce((sum, c) => sum + c.weight, 0)
+            return longCoins.map(c => ({ 
+              coin: c.ticker, 
+              weight: totalWeight > 0 ? c.weight / totalWeight : 1 / longCoins.length 
+            }))
+          })(),
+          shortBasket: (() => {
+            const totalWeight = shortCoins.reduce((sum, c) => sum + c.weight, 0)
+            return shortCoins.map(c => ({ 
+              coin: c.ticker, 
+              weight: totalWeight > 0 ? c.weight / totalWeight : 1 / shortCoins.length 
+            }))
+          })(),
         } : undefined}
       />
 
