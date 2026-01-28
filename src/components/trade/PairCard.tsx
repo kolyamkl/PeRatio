@@ -70,40 +70,76 @@ export function PairCard({
     }
   }
 
+  // Calculate total weight across both sides for percentage display
+  const totalLongWeight = longCoins.reduce((sum, c) => sum + c.weight, 0)
+  const totalShortWeight = shortCoins.reduce((sum, c) => sum + c.weight, 0)
+  const totalWeight = totalLongWeight + totalShortWeight
+
   const handleAddCoin = (coin: Coin) => {
     hapticFeedback('selection')
-    // Add coin with default weight, then redistribute weights evenly
-    const coinWithWeight: CoinWithWeight = { ...coin, weight: 1 }
     
     if (showCoinSelector === 'long') {
       if (!longCoins.find(c => c.ticker === coin.ticker)) {
-        const newCoins = [...longCoins, coinWithWeight]
-        // Redistribute weights evenly
-        const evenWeight = 100 / newCoins.length
-        onLongCoinsChange(newCoins.map(c => ({ ...c, weight: evenWeight })))
+        // Add coin and redistribute weights so total basket = 100%
+        // Each side gets 50% by default, split evenly among coins
+        const newLongCoins = [...longCoins, { ...coin, weight: 1 }]
+        const longWeight = 50 / newLongCoins.length
+        const shortWeight = shortCoins.length > 0 ? 50 / shortCoins.length : 50
+        
+        onLongCoinsChange(newLongCoins.map(c => ({ ...c, weight: longWeight })))
+        if (shortCoins.length > 0) {
+          onShortCoinsChange(shortCoins.map(c => ({ ...c, weight: shortWeight })))
+        }
       }
     } else if (showCoinSelector === 'short') {
       if (!shortCoins.find(c => c.ticker === coin.ticker)) {
-        const newCoins = [...shortCoins, coinWithWeight]
-        // Redistribute weights evenly
-        const evenWeight = 100 / newCoins.length
-        onShortCoinsChange(newCoins.map(c => ({ ...c, weight: evenWeight })))
+        const newShortCoins = [...shortCoins, { ...coin, weight: 1 }]
+        const shortWeight = 50 / newShortCoins.length
+        const longWeight = longCoins.length > 0 ? 50 / longCoins.length : 50
+        
+        onShortCoinsChange(newShortCoins.map(c => ({ ...c, weight: shortWeight })))
+        if (longCoins.length > 0) {
+          onLongCoinsChange(longCoins.map(c => ({ ...c, weight: longWeight })))
+        }
       }
     }
   }
 
-  // Update weight for a specific coin
+  // Update weight for a specific coin - auto-adjust other side so total = 100%
   const handleWeightChange = (type: 'long' | 'short', ticker: string, newWeight: number) => {
     hapticFeedback('selection')
     const coins = type === 'long' ? longCoins : shortCoins
+    const otherCoins = type === 'long' ? shortCoins : longCoins
+    
+    // Update the changed coin's weight
     const updatedCoins = coins.map(c => 
       c.ticker === ticker ? { ...c, weight: newWeight } : c
     )
     
+    // Calculate new total for this side
+    const thisSideTotal = updatedCoins.reduce((sum, c) => sum + c.weight, 0)
+    
+    // The other side should get the remaining percentage (100 - thisSideTotal)
+    const otherSideTarget = Math.max(0, 100 - thisSideTotal)
+    const otherSideCurrentTotal = otherCoins.reduce((sum, c) => sum + c.weight, 0)
+    
+    // Scale other side proportionally to reach the target
+    let updatedOtherCoins = otherCoins
+    if (otherCoins.length > 0 && otherSideCurrentTotal > 0) {
+      const scale = otherSideTarget / otherSideCurrentTotal
+      updatedOtherCoins = otherCoins.map(c => ({ ...c, weight: c.weight * scale }))
+    } else if (otherCoins.length > 0) {
+      // If other side has 0 total, distribute evenly
+      const evenWeight = otherSideTarget / otherCoins.length
+      updatedOtherCoins = otherCoins.map(c => ({ ...c, weight: evenWeight }))
+    }
+    
     if (type === 'long') {
       onLongCoinsChange(updatedCoins)
+      onShortCoinsChange(updatedOtherCoins)
     } else {
       onShortCoinsChange(updatedCoins)
+      onLongCoinsChange(updatedOtherCoins)
     }
   }
 
@@ -158,7 +194,7 @@ export function PairCard({
                 const val = Math.max(1, Math.min(100, parseInt(e.target.value) || 1))
                 handleWeightChange(type, coin.ticker, val)
               }}
-              className={`w-12 text-right text-sm font-bold bg-transparent border-b border-dashed focus:outline-none focus:border-solid ${isLong ? 'text-accent-success border-accent-success/30' : 'text-accent-danger border-accent-danger/30'}`}
+              className={`w-14 text-center text-sm font-bold rounded-lg px-1 py-0.5 focus:outline-none focus:ring-1 ${isLong ? 'text-accent-success bg-black/40 focus:ring-accent-success/50' : 'text-accent-danger bg-black/40 focus:ring-accent-danger/50'}`}
               min="1"
               max="100"
             />

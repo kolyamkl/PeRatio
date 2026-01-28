@@ -29,15 +29,15 @@ export function SettingsModal({
 
   if (!isOpen) return null
 
-  const options: { value: FrequencyOption; label: string; icon?: string }[] = [
-    { value: 'never', label: 'Never', icon: '🔕' },
-    { value: '1m', label: '1 Min', icon: '⚡' },
-    { value: '5m', label: '5 Min', icon: '🔔' },
-    { value: '15m', label: '15 Min', icon: '📊' },
-    { value: '1h', label: '1 Hour', icon: '⏰' },
-    { value: '2h', label: '2 Hours', icon: '📈' },
-    { value: '4h', label: '4 Hours', icon: '🎯' },
-    { value: 'daily', label: 'Daily', icon: '📅' },
+  const options: { value: FrequencyOption; label: string }[] = [
+    { value: 'never', label: 'Never' },
+    { value: '1m', label: '1 Min' },
+    { value: '5m', label: '5 Min' },
+    { value: '15m', label: '15 Min' },
+    { value: '1h', label: '1 Hour' },
+    { value: '2h', label: '2 Hours' },
+    { value: '4h', label: '4 Hours' },
+    { value: 'daily', label: 'Daily' },
   ]
 
   const handleSave = () => {
@@ -138,9 +138,8 @@ export function SettingsModal({
                     {/* Hover shine effect */}
                     <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-500" />
                     
-                    <span className="relative flex items-center justify-center gap-2">
-                      <span>{opt.icon}</span>
-                      <span>{opt.label}</span>
+                    <span className="relative flex items-center justify-center">
+                      {opt.label}
                     </span>
                   </button>
                 ))}
@@ -169,20 +168,23 @@ export function SettingsModal({
               </div>
             )}
 
-            {/* Save Message */}
-            {saveMessage && (
-              <div
-                className={`mb-4 p-4 rounded-xl text-sm flex items-center gap-2 animate-fade-up ${
-                  saveMessage.includes('success') || saveMessage.includes('saved')
-                    ? 'bg-accent-success/10 text-accent-success border border-accent-success/20'
-                    : 'bg-accent-danger/10 text-accent-danger border border-accent-danger/20'
-                }`}
-              >
-                <span className="text-lg">{saveMessage.includes('success') || saveMessage.includes('saved') ? '✅' : '❌'}</span>
-                {saveMessage}
-              </div>
-            )}
           </div>
+
+          {/* Save Message - positioned above footer */}
+          {saveMessage && (
+            <div
+              className={`mx-5 mb-4 p-4 rounded-xl text-sm flex items-center gap-2 animate-fade-up ${
+                saveMessage.includes('success') || saveMessage.includes('saved')
+                  ? 'bg-accent-success/10 text-accent-success border border-accent-success/20'
+                  : 'bg-accent-danger/10 text-accent-danger border border-accent-danger/20'
+              }`}
+            >
+              {saveMessage.includes('success') || saveMessage.includes('saved') 
+                ? <Sparkles className="w-4 h-4" />
+                : <X className="w-4 h-4" />}
+              <span>{saveMessage.replace(/^[✅❌]\s*/, '')}</span>
+            </div>
+          )}
 
           {/* Footer */}
           <div className="relative p-5 border-t border-border/50">

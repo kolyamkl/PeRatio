@@ -55,11 +55,11 @@ export function TradeConfirmPage() {
   }
 
   const [longCoins, setLongCoins] = useState<CoinWithWeight[]>([
-    getInitialCoin('BTC', 100)
+    getInitialCoin('BTC', 50)
   ])
   
   const [shortCoins, setShortCoins] = useState<CoinWithWeight[]>([
-    getInitialCoin('ETH', 100)
+    getInitialCoin('ETH', 50)
   ])
 
   // State to store tradeId from URL
@@ -138,34 +138,38 @@ export function TradeConfirmPage() {
     
     // Parse and apply baskets from URL
     try {
+      let parsedLongBasket: any[] = []
+      let parsedShortBasket: any[] = []
+      
       if (longBasketStr) {
-        // URL decode and parse
         const decoded = decodeURIComponent(longBasketStr)
-        const longBasketData = JSON.parse(decoded)
-        console.log('[TradeConfirm] 📗 Setting long basket from URL:', longBasketData)
-        setLongBasket(longBasketData)
-        
-        // Set long coins for display with weights (convert weight 0-1 to percentage 0-100)
-        if (longBasketData.length > 0) {
-          const totalWeight = longBasketData.reduce((sum: number, a: any) => sum + (a.weight || 1), 0)
-          const coins = longBasketData.map((a: any) => 
-            getInitialCoin(a.coin, ((a.weight || 1) / totalWeight) * 100)
-          )
-          setLongCoins(coins)
-        }
+        parsedLongBasket = JSON.parse(decoded)
+        console.log('[TradeConfirm] 📗 Setting long basket from URL:', parsedLongBasket)
+        setLongBasket(parsedLongBasket)
       }
       
       if (shortBasketStr) {
         const decoded = decodeURIComponent(shortBasketStr)
-        const shortBasketData = JSON.parse(decoded)
-        console.log('[TradeConfirm] 📕 Setting short basket from URL:', shortBasketData)
-        setShortBasket(shortBasketData)
+        parsedShortBasket = JSON.parse(decoded)
+        console.log('[TradeConfirm] 📕 Setting short basket from URL:', parsedShortBasket)
+        setShortBasket(parsedShortBasket)
+      }
+      
+      // Calculate weights so total basket = 100% (50% long + 50% short)
+      if (parsedLongBasket.length > 0 || parsedShortBasket.length > 0) {
+        const longTotal = parsedLongBasket.reduce((sum: number, a: any) => sum + (a.weight || 1), 0)
+        const shortTotal = parsedShortBasket.reduce((sum: number, a: any) => sum + (a.weight || 1), 0)
         
-        // Set short coins for display with weights
-        if (shortBasketData.length > 0) {
-          const totalWeight = shortBasketData.reduce((sum: number, a: any) => sum + (a.weight || 1), 0)
-          const coins = shortBasketData.map((a: any) => 
-            getInitialCoin(a.coin, ((a.weight || 1) / totalWeight) * 100)
+        if (parsedLongBasket.length > 0) {
+          const coins = parsedLongBasket.map((a: any) => 
+            getInitialCoin(a.coin, ((a.weight || 1) / longTotal) * 50)
+          )
+          setLongCoins(coins)
+        }
+        
+        if (parsedShortBasket.length > 0) {
+          const coins = parsedShortBasket.map((a: any) => 
+            getInitialCoin(a.coin, ((a.weight || 1) / shortTotal) * 50)
           )
           setShortCoins(coins)
         }
@@ -381,7 +385,7 @@ export function TradeConfirmPage() {
         <RiskRewardCard {...riskRewardData} stopLoss={stopLoss} takeProfit={takeProfit} />
         
         {/* Spacer for sticky button */}
-        <div className="h-28" />
+        <div className="h-20" />
       </div>
       
       {/* Sticky Confirm Button */}
